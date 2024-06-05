@@ -41,7 +41,7 @@ void test_basics() {
 void test_cnt() {
 
 	Tensor<int> t1("t1");
-	t1 = std::move(Tensor<int>::range(1, 25).reshape({ 2,2,3,2 }));
+	t1 = Tensor<int>::range(1, 25).reshape({ 2,2,3,2 });
 	std::cout << "t1:\n" << t1.to_string() << std::endl;
 	int v[] = { 11,12,21,22 };
 	Tensor<int> t2({ 2, 2 }, v); t2.set_meta("t2");
@@ -131,12 +131,12 @@ int main() { //int argc, char* argv[]) {
 
 	//if (argc > 1)
 	//	rank = atoi(argv[1]);
-	//test_basics();
-	//test_initlist({ 3,2,3,2 });
-	//test_index();
-	//test_cnt();
+	test_basics();
+	test_initlist({ 3,2,3,2 });
+	test_index();
+	test_cnt();
 	test_opt();
-	//test_views();
+	test_views();
 	//{
 	//	Tensor<int> t;
 	//	t = Tensor<int>::range(0, 5);
