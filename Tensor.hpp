@@ -152,6 +152,7 @@ public:
 		set_meta(rhs.get_meta() + "Cc;");
 		LOG("tns cns, cop " << &rhs << " -> " << this << " : " << meta);
 	}
+	
 	// copy assignment
 	Tensor<F>& operator=(const Tensor<F>& rhs) {
 		if (this == &rhs || !rhs.size)
@@ -197,6 +198,7 @@ public:
 		LOG("tns cns, mov " << &rhs << " -> " << this << " : " << meta);
 
 	}
+	
 	// move assignement
 	Tensor<F>& operator=(Tensor<F>&& rhs) noexcept {
 		if (this == &rhs || !rhs.size)

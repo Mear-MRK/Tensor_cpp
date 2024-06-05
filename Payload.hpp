@@ -44,11 +44,12 @@ public:
 	}
 
 	// Copy constructor
-	Payload(const Payload<F>& oth) : ref_count(oth.ref_count), size(size), arr(oth.arr) {
+	Payload(const Payload<F>& oth) : ref_count(oth.ref_count), size(oth.size), arr(oth.arr) {
 		inc_ref_count();
 		LOG("pyl cns, cop " << &oth << "-c->" << this);
 
 	}
+	
 	// Copy assignment
 	Payload<F>& operator=(const Payload<F>& rhs) {
 		if (this == &rhs)
@@ -61,13 +62,15 @@ public:
 		LOG("pyl asn, cop " << &rhs << "-c=>" << this);
 		return *this;
 	}
+	
 	// Move constructor
 	Payload(Payload<F>&& oth) noexcept : ref_count(oth.ref_count), size(oth.size), arr(oth.arr) {
 		oth.ref_count = nullptr;
 		oth.size = 0;
 		oth.arr = nullptr;
-		LOG("pyl cns, mov " << &oth << "-m->" this);
+		LOG("pyl cns, mov " << &oth << "-m->" << this);
 	}
+	
 	// Move assignemnt
 	Payload<F>& operator=(Payload<F>&& rhs) noexcept {
 		if (this == &rhs)
