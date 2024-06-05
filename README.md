@@ -45,11 +45,13 @@ tensor1[{1}] = 3; // Sets the 2nd row of tensor1 to 3
 Tensor<float> result = tensor1 + tensor2; // Addition
 result *= 2.0; // Multiplication by scalar
 
-result = Tensor<float>::cnt(tensor1, tensor2, 1, 0) // Contraction of 2nd index of tensor1 with 1st index of tensor2
+auto res = Tensor<float>::cnt(tensor1, tensor2, 1, 0); // Contraction of 2nd index of tensor1 with 1st index of tensor2
+auto res2 = tensor1 % tensor2; // Matrix product
+bool b = res.is_close_to(res2, 1e-7); // True
 
-res = result.copy() // Cloning result
+auto res3 = result.copy(); // Cloning result
 
-res.apply(func)  // Applying element-wise function 'float func(float)' to res
+res3.apply(func);  // Applying element-wise function 'float func(float)' to res3
 ```
 
 Enable debugging by defining the `DEBUG` preprocessor directive:
