@@ -514,7 +514,7 @@ public:
 			throw std::invalid_argument("is_close_to : incompatible dimensions.");
 		for (size_t i = 0; i < size; i++) {
 			F dif = data[i + off] - rhs.data[i + rhs.off];
-			if (dif >= eps || dif <= -eps)
+			if (std::abs(dif) > std::abs(eps))
 				return false;
 		}
 		return true;
