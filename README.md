@@ -45,15 +45,9 @@ result *= 2.0; // Multiplication by scalar
 
 result = Tensor<float>::cnt(tensor1, tensor2, 1, 0) // Contraction of 2nd index of tensor1 with 1st index of tensor2
 
-result.apply(func)  // Applying element-wise function 'float func(float)' to result
-```
+res = result.copy() // Cloning result
 
-The library includes support for copy and move semantics to optimize performance:
-
-```cpp
-Tensor<float> tensor1({2, 2}, 1.0);
-Tensor<float> tensor2 = tensor1; // Copy constructor
-Tensor<float> tensor3 = std::move(tensor1); // Move constructor
+res.apply(func)  // Applying element-wise function 'float func(float)' to res
 ```
 
 Enable debugging by defining the `DEBUG` preprocessor directive:
