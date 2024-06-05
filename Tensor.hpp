@@ -5,6 +5,7 @@
 #include <cstring>
 #include <cstdio>
 #include <initializer_list>
+#include <complex>
 #include "Payload.hpp"
 
 #ifdef DEBUG
@@ -53,6 +54,16 @@ inline void decomp_index(size_t index[], size_t l_index[], size_t r_index[],
 	{
 		r_index[i++] = index[j++];
 	}
+}
+
+template<typename F>
+inline std::string to_str(std::complex<F> c) {
+	return std::to_string(c.real()) + "+" + std::to_string(c.imag()) + "i";
+}
+
+template<typename F>
+inline std::string to_str(F f) {
+	return std::to_string(f);
 }
 
 
@@ -535,7 +546,7 @@ public:
 				}
 				out += std::to_string(index[rank - 2]) + ":\t";
 			}
-			out += std::to_string(data.at(i + off)) + " ";
+			out += to_str(data.at(i + off)) + " ";
 			i++;
 		} while (i < size && inc_index(index));
 		out += "\n";

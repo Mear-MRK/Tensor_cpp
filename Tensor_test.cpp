@@ -1,9 +1,11 @@
 #include <iostream>
 #include <random>
 #include <functional>
+#include <complex>
+#include <cstdlib>
+
 #include "tensor.hpp"
 
-#include <cstdlib>
 
 std::default_random_engine rnd_gen;
 std::uniform_real_distribution<float> flt_dist(-1.0f, 1.0f);
@@ -35,6 +37,13 @@ void test_basics() {
 	res = tn + r_tn;
 	res.reshape({ 3, 2 }).apply(sqr);
 	std::cout << res.to_string() << std::endl;
+	Tensor<std::complex<float>> ct(3);
+	ct[1] = std::complex<float>{-1, 1};
+	std::cout << ct.to_string() << std::endl;
+	ct += std::complex<float>{0,3};
+	std::cout << ct.to_string() << std::endl;
+	ct /= std::complex<float>{1,1};
+	std::cout << ct.to_string() << std::endl;
 
 }
 
@@ -127,21 +136,15 @@ void test_views() {
 	std::cout << "tt: " << tt.to_string() << std::endl;
 }
 
-int main() { //int argc, char* argv[]) {
+int main() {
 
-	//if (argc > 1)
-	//	rank = atoi(argv[1]);
 	test_basics();
 	test_initlist({ 3,2,3,2 });
 	test_index();
 	test_cnt();
 	test_opt();
 	test_views();
-	//{
-	//	Tensor<int> t;
-	//	t = Tensor<int>::range(0, 5);
-	//	t.get_data();
-	//}
+
 	std::cout << "Press Enter to end>";
 	std::cin.get();
 	return 0;
