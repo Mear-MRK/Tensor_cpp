@@ -68,6 +68,7 @@ void test_cnt() {
 	Tensor<float> l_v({ 3 }, 1.0f, 3.0f);
 	std::cout << l_v.to_string() << std::endl;
 	Tensor<float> r_v = Tensor<float>::range(-2, 1).reshape({ 3 });
+	std::cout << "r_v is close to l_v? " << r_v.is_close_to(l_v, 1e-7) << std::endl;
 	std::cout << r_v.to_string() << std::endl;
 	std::cout << Tensor<float>::cnt(l_v, r_v, 0, 0).to_string() << std::endl;
 	std::cout << (l_v % r_v).to_string() << (r_v % l_v).to_string() << std::endl;
