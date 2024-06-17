@@ -7,36 +7,41 @@
 #define LOG(s)
 #endif
 
-template<typename F>
+template <typename F>
 class Payload
 {
 private:
-	int* ref_count;
+	int *ref_count;
 	size_t size;
-	F* arr;
+	F *arr;
 
 public:
-
 	Payload() : ref_count(nullptr), size(0), arr(nullptr) { LOG("pyl cns, dfl " << this); }
 
-	Payload(size_t size) : size(size) {
-		if (size) {
+	Payload(size_t size) : size(size)
+	{
+		if (size)
+		{
 			ref_count = new int(1);
 			arr = new F[size];
 		}
-		else {
+		else
+		{
 			ref_count = nullptr;
 			arr = nullptr;
 		}
 		LOG("pyl cns, siz " << this);
 	}
 
-	Payload(F array[], size_t size) : size(size) {
-		if (size) {
+	Payload(F array[], size_t size) : size(size)
+	{
+		if (size)
+		{
 			ref_count = new int(1);
 			arr = array;
 		}
-		else {
+		else
+		{
 			ref_count = nullptr;
 			arr = nullptr;
 		}
@@ -44,14 +49,15 @@ public:
 	}
 
 	// Copy constructor
-	Payload(const Payload<F>& oth) : ref_count(oth.ref_count), size(oth.size), arr(oth.arr) {
+	Payload(const Payload<F> &oth) : ref_count(oth.ref_count), size(oth.size), arr(oth.arr)
+	{
 		inc_ref_count();
 		LOG("pyl cns, cop " << &oth << "-c->" << this);
-
 	}
-	
+
 	// Copy assignment
-	Payload<F>& operator=(const Payload<F>& rhs) {
+	Payload<F> &operator=(const Payload<F> &rhs)
+	{
 		if (this == &rhs)
 			return *this;
 		dec_ref_count();
@@ -62,17 +68,19 @@ public:
 		LOG("pyl asn, cop " << &rhs << "-c=>" << this);
 		return *this;
 	}
-	
+
 	// Move constructor
-	Payload(Payload<F>&& oth) noexcept : ref_count(oth.ref_count), size(oth.size), arr(oth.arr) {
+	Payload(Payload<F> &&oth) noexcept : ref_count(oth.ref_count), size(oth.size), arr(oth.arr)
+	{
 		oth.ref_count = nullptr;
 		oth.size = 0;
 		oth.arr = nullptr;
 		LOG("pyl cns, mov " << &oth << "-m->" << this);
 	}
-	
+
 	// Move assignemnt
-	Payload<F>& operator=(Payload<F>&& rhs) noexcept {
+	Payload<F> &operator=(Payload<F> &&rhs) noexcept
+	{
 		if (this == &rhs)
 			return *this;
 		dec_ref_count();
@@ -86,67 +94,81 @@ public:
 		return *this;
 	}
 
-	Payload(size_t size, F value) : size(size) {
-		if (size) {
+	Payload(size_t size, F value) : size(size)
+	{
+		if (size)
+		{
 			ref_count = new int(1);
 			arr = new F[size];
 			std::fill_n(arr, size, value);
 		}
-		else {
+		else
+		{
 			ref_count = nullptr;
 			arr = nullptr;
 		}
 		LOG("pyl cns, szv " << this);
 	}
 
-	Payload(size_t size, F start, F end) : size(size) {
-		if (size) {
+	Payload(size_t size, F start, F end) : size(size)
+	{
+		if (size)
+		{
 			ref_count = new int(1);
 			arr = new F[size];
-			if (size > 1) {
+			if (size > 1)
+			{
 				F step = (end - start) / (size - 1);
-				for (size_t i = 0; i < size; i++) {
+				for (size_t i = 0; i < size; i++)
+				{
 					arr[i] = start + i * step;
 				}
 			}
-			else {
+			else
+			{
 				arr[0] = start;
 			}
 		}
-		else {
+		else
+		{
 			ref_count = nullptr;
 			arr = nullptr;
 		}
 		LOG("pyl cns, lin " << this);
 	}
 
-	void release() {
+	void release()
+	{
 		dec_ref_count();
 		size = 0;
 		ref_count = nullptr;
 		arr = nullptr;
 	}
 
-	Payload<F> copy(size_t offset = 0, size_t new_size = ~0ull) const {
+	Payload<F> copy(size_t offset = 0, size_t new_size = ~0ull) const
+	{
 		if (offset >= size)
 			return Payload<F>();
 		size_t m_size = std::min<size_t>(new_size, size);
 		m_size = (m_size + offset <= size) ? m_size : size - offset;
 		Payload<F> out = Payload<F>(m_size);
-		if (m_size) {
+		if (m_size)
+		{
 			memcpy(out.arr, arr + offset, m_size * sizeof(F));
 		}
 		return out;
 	}
 
-	Payload<F>& assign(const Payload<F>& oth, size_t oth_off = 0, size_t cp_size = ~0ull, size_t cp_off = 0, size_t oth_size = ~0ull) {
+	Payload<F> &assign(const Payload<F> &oth, size_t oth_off = 0, size_t cp_size = ~0ull, size_t cp_off = 0, size_t oth_size = ~0ull)
+	{
 		if (this == &oth || oth_off >= oth.size || !cp_size || !oth_size || !oth.arr)
 			return *this;
 		if (oth_size == ~0ull || oth_off + oth_size > oth.size)
 			oth_size = oth.size - oth_off;
 		if (cp_size > oth_size)
 			cp_size = oth_size;
-		if (!size) {
+		if (!size)
+		{
 			init(cp_off + cp_size);
 		}
 		if (cp_off >= size)
@@ -158,87 +180,103 @@ public:
 		return *this;
 	}
 
-	bool init(size_t size) {
-		if (ref_count) {
+	bool init(size_t size)
+	{
+		if (ref_count)
+		{
 			LOG("pyl init, already initialized " << this);
 			return false;
 		}
 		this->size = size;
-		if (size) {
+		if (size)
+		{
 			ref_count = new int(1);
 			arr = new F[size];
 			return true;
 		}
-		else {
+		else
+		{
 			ref_count = nullptr;
 			arr = nullptr;
 			return false;
 		}
 	}
 
-	bool init(F array[], size_t size) {
-		if (ref_count) {
+	bool init(F array[], size_t size)
+	{
+		if (ref_count)
+		{
 			LOG("pyl init, already initialized " << this);
 			return false;
 		}
 		this->size = size;
-		if (size) {
+		if (size)
+		{
 			ref_count = new int(1);
 			arr = array;
 			return true;
 		}
-		else {
+		else
+		{
 			ref_count = nullptr;
 			arr = nullptr;
 			return false;
 		}
 	}
 
-	~Payload() {
+	~Payload()
+	{
 		dec_ref_count();
 		LOG("pyl dst,     " << this);
 	}
 
-	int get_ref_count() const {
+	int get_ref_count() const
+	{
 		if (ref_count != nullptr)
 			return *ref_count;
 		return -1;
 	}
 
-	inline F& operator[](size_t i) const {
+	inline F &operator[](size_t i)
+	{
 		// Doesn't check if arr is null or index out of bound
 		return arr[i];
 	}
 
-	inline F at(size_t i) const {
+	inline const F &operator[](size_t i) const
+	{
 		// Doesn't check if arr is null or index out of bound
 		return arr[i];
 	}
 
-	inline F* get_arr() const {
+
+	inline F *get_arr()
+	{
 		return arr;
 	}
 
-	inline size_t get_size() const {
+	inline size_t get_size() const
+	{
 		return size;
 	}
 
-
 private:
-	void inline inc_ref_count() {
+	void inline inc_ref_count()
+	{
 		if (ref_count != nullptr)
 			(*ref_count)++;
 	}
 
-	void inline dec_ref_count() {
-		if (ref_count != nullptr) {
+	void inline dec_ref_count()
+	{
+		if (ref_count != nullptr)
+		{
 			(*ref_count)--;
-			if (*ref_count == 0) {
+			if (*ref_count == 0)
+			{
 				delete[] arr;
 				delete ref_count;
 			}
 		}
 	}
-
 };
-

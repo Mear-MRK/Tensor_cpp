@@ -546,7 +546,7 @@ public:
 				}
 				out += std::to_string(index[rank - 2]) + ":\t";
 			}
-			out += to_str(data.at(i + off)) + " ";
+			out += to_str(data[i + off]) + " ";
 			i++;
 		} while (i < size && inc_index(index));
 		out += "\n";
