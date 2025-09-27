@@ -122,6 +122,11 @@ public:
 
 	Tensor()
 	{
+		rank = 0;
+		size = 0;
+		off = 0;
+		dim = nullptr;
+		jump = nullptr;
 		LOG("tns cns, dfl " << this << " : " << meta);
 	}
 
@@ -325,6 +330,9 @@ public:
 	Tensor(const std::initializer_list<size_t>& dim_l, const F arr[]) : Tensor(dim_l.begin(), dim_l.size(), arr) {
 	}
 
+	Tensor(const std::initializer_list<size_t>& dim_l, F value) : Tensor(dim_l.begin(), dim_l.size(), value) {
+	}
+
 	Tensor(const std::initializer_list<size_t>& dim_l, F start, F end) : Tensor(dim_l.begin(), dim_l.size(), start, end)
 	{}
 
@@ -525,12 +533,18 @@ public:
 		std::string out = "Rank " + std::to_string(rank) + " Tensor, dims: ";
 		if (!rank) {
 			out += "-\n";
+			out += "meta: " + std::string(meta) + "\n";
+			return out;
 		}
 		else {
 			for (unsigned r = 0; r < rank; r++)
 				out += std::to_string(dim[r]) + ((r != rank - 1) ? "," : "");
 		}
 		out += "\nmeta: " + std::string(meta) + "\n";
+
+		if (!size) {
+			return out;
+		}
 
 		size_t* index = new size_t[rank]{ 0 };
 		size_t i = 0;
@@ -577,7 +591,7 @@ public:
 	}
 
 	Tensor<F> operator[](size_t i) const {
-		if (i >= size || !rank)
+		if (!rank || i >= dim[0])
 			return Tensor<F>();
 		if (rank == 1) {
 			Tensor<F> out;

@@ -4,7 +4,7 @@
 #include <complex>
 #include <cstdlib>
 
-#include "tensor.hpp"
+#include "Tensor.hpp"
 
 
 std::default_random_engine rnd_gen;
@@ -137,6 +137,26 @@ void test_views() {
 	std::cout << "tt: " << tt.to_string() << std::endl;
 }
 
+void test_indexing_bug() {
+	std::cout << "\n--Testing indexing bug--\n";
+	Tensor<float> t({2, 3}, 1.0f);
+	std::cout << "t:\n" << t.to_string();
+	Tensor<float> view = t[2]; // Out of bounds access
+	std::cout << "t[2]:\n" << view.to_string();
+	if (view.get_size() == 0) {
+		std::cout << "SUCCESS: Out-of-bounds access correctly returned an empty tensor.\n";
+	} else {
+		std::cout << "FAILURE: Out-of-bounds access did not return an empty tensor.\n";
+	}
+	Tensor<float> view2 = t[1]; // In-bounds access
+	std::cout << "t[1]:\n" << view2.to_string();
+	if (view2.get_size() > 0) {
+		 std::cout << "SUCCESS: In-bounds access correctly returned a non-empty tensor.\n";
+	} else {
+		 std::cout << "FAILURE: In-bounds access returned an empty tensor.\n";
+	}
+}
+
 int main() {
 
 	test_basics();
@@ -145,6 +165,7 @@ int main() {
 	test_cnt();
 	test_opt();
 	test_views();
+	test_indexing_bug();
 
 	std::cout << "Press Enter to end>";
 	std::cin.get();
