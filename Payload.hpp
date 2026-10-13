@@ -11,6 +11,7 @@
 #define LOG(s)
 #endif
 
+// Manages a reference-counted contiguous array of values.
 template <typename F>
 class Payload
 {
@@ -20,8 +21,10 @@ private:
 	F *arr;
 
 public:
+	// Creates an empty payload.
 	Payload() : ref_count(nullptr), size(0), arr(nullptr) { LOG("pyl cns, dfl " << this); }
 
+	// Allocates an uninitialized payload with the requested size.
 	explicit Payload(size_t size) : size(size)
 	{
 		if (size)
@@ -37,6 +40,7 @@ public:
 		LOG("pyl cns, siz " << this);
 	}
 
+	// Copies an array into a newly allocated payload.
 	Payload(const F array[], size_t size) : size(size)
 	{
 		if (size)
@@ -53,14 +57,14 @@ public:
 		LOG("pyl cns, arr " << this);
 	}
 
-	// Copy constructor
+	// Shares the referenced storage with another payload.
 	Payload(const Payload<F> &oth) : ref_count(oth.ref_count), size(oth.size), arr(oth.arr)
 	{
 		inc_ref_count();
 		LOG("pyl cns, cop " << &oth << "-c->" << this);
 	}
 
-	// Copy assignment
+	// Replaces this payload with shared storage from another payload.
 	Payload<F> &operator=(const Payload<F> &rhs)
 	{
 		if (this == &rhs)
@@ -74,7 +78,7 @@ public:
 		return *this;
 	}
 
-	// Move constructor
+	// Transfers storage ownership from another payload.
 	Payload(Payload<F> &&oth) noexcept : ref_count(oth.ref_count), size(oth.size), arr(oth.arr)
 	{
 		oth.ref_count = nullptr;
@@ -83,7 +87,7 @@ public:
 		LOG("pyl cns, mov " << &oth << "-m->" << this);
 	}
 
-	// Move assignemnt
+	// Replaces this payload by moving storage from another payload.
 	Payload<F> &operator=(Payload<F> &&rhs) noexcept
 	{
 		if (this == &rhs)
@@ -99,6 +103,7 @@ public:
 		return *this;
 	}
 
+	// Allocates a payload and fills every element with a value.
 	Payload(size_t size, F value) : size(size)
 	{
 		if (size)
@@ -115,6 +120,7 @@ public:
 		LOG("pyl cns, szv " << this);
 	}
 
+	// Allocates a payload filled with evenly spaced values.
 	Payload(size_t size, F start, F end) : size(size)
 	{
 		if (size)
@@ -142,6 +148,7 @@ public:
 		LOG("pyl cns, lin " << this);
 	}
 
+	// Releases this payload's reference to its storage.
 	void release()
 	{
 		dec_ref_count();
@@ -150,6 +157,7 @@ public:
 		arr = nullptr;
 	}
 
+	// Returns an independent copy of a selected data range.
 	Payload<F> copy(size_t offset = 0, size_t new_size = ~0ull) const
 	{
 		if (offset >= size)
@@ -164,6 +172,7 @@ public:
 		return out;
 	}
 
+	// Copies a bounded range from another payload into this payload.
 	Payload<F> &assign(const Payload<F> &oth, size_t oth_off = 0, size_t cp_size = ~0ull, size_t cp_off = 0, size_t oth_size = ~0ull)
 	{
 		if (this == &oth || oth_off >= oth.size || !cp_size || !oth_size || !oth.arr)
@@ -185,6 +194,7 @@ public:
 		return *this;
 	}
 
+	// Initializes empty storage with the requested size.
 	bool init(size_t size)
 	{
 		if (ref_count)
@@ -207,6 +217,7 @@ public:
 		}
 	}
 
+	// Initializes empty storage by copying an input array.
 	bool init(const F array[], size_t size)
 	{
 		if (ref_count)
@@ -230,12 +241,14 @@ public:
 		}
 	}
 
+	// Releases the payload's reference and destroys unshared storage.
 	~Payload()
 	{
 		dec_ref_count();
 		LOG("pyl dst,     " << this);
 	}
 
+	// Returns the current storage reference count or -1 when empty.
 	int get_ref_count() const
 	{
 		if (ref_count != nullptr)
@@ -243,12 +256,14 @@ public:
 		return -1;
 	}
 
+	// Returns mutable unchecked access to an element.
 	inline F &operator[](size_t i)
 	{
 		// Doesn't check if arr is null or index out of bound
 		return arr[i];
 	}
 
+	// Returns immutable unchecked access to an element.
 	inline const F &operator[](size_t i) const
 	{
 		// Doesn't check if arr is null or index out of bound
@@ -256,28 +271,33 @@ public:
 	}
 
 
+	// Returns the mutable raw storage pointer.
 	inline F *get_arr()
 	{
 		return arr;
 	}
 
+	// Returns the immutable raw storage pointer.
 	inline const F *get_arr() const
 	{
 		return arr;
 	}
 
+	// Returns the number of stored elements.
 	inline size_t get_size() const
 	{
 		return size;
 	}
 
 private:
+	// Increments the shared storage reference count when present.
 	void inline inc_ref_count()
 	{
 		if (ref_count != nullptr)
 			(*ref_count)++;
 	}
 
+	// Decrements the reference count and frees unreferenced storage.
 	void inline dec_ref_count()
 	{
 		if (ref_count != nullptr)

@@ -10,10 +10,12 @@
 std::default_random_engine rnd_gen;
 std::uniform_real_distribution<float> flt_dist(-1.0f, 1.0f);
 
+// Returns a random float in the configured distribution range.
 float rnd(void) {
 	return flt_dist(rnd_gen);
 }
 
+// Prints every element in an array on one line.
 template<typename T>
 void print_arr(T arr[], size_t size) {
 	for (size_t i = 0; i < size; i++)
@@ -21,10 +23,12 @@ void print_arr(T arr[], size_t size) {
 	std::cout << std::endl;
 }
 
+// Returns the square of a float.
 float sqr(float f) {
 	return f * f;
 }
 
+// Exercises construction, arithmetic, reshaping, and complex values.
 void test_basics() {
 	size_t dim[] = { 2, 3 };
 	unsigned rank = 2;
@@ -47,6 +51,7 @@ void test_basics() {
 
 }
 
+// Exercises tensor contraction and its shorthand operator.
 void test_cnt() {
 
 	Tensor<int> t1("t1");
@@ -76,6 +81,7 @@ void test_cnt() {
 	std::cout << "--End cnt--" << std::endl;
 }
 
+// Exercises composition and decomposition of contraction indices.
 void test_index() {
 	size_t i1[]{ 1,2,3,4 }; print_arr<size_t>(i1, 4);
 	size_t i2[]{ 5,6,7 };   print_arr<size_t>(i2, 3);
@@ -93,6 +99,7 @@ void test_index() {
 	print_arr<size_t>(i, 5);
 }
 
+// Demonstrates shape and stride calculation from a dimension list.
 void test_initlist(const std::initializer_list<size_t>& dim_l) {
 	unsigned rank = dim_l.size();
 	std::cout << "rank: " << rank << std::endl;
@@ -116,6 +123,7 @@ void test_initlist(const std::initializer_list<size_t>& dim_l) {
 	delete[] dim;
 }
 
+// Exercises element-wise addition of generated tensors.
 void test_opt() {
 	Tensor<> a({ 3, 4 }, rnd); // Tensor<>::linspace(1, 5, 12).reshape({ 3,4 });
 	Tensor<> b({ 3, 4 }, rnd);
@@ -126,6 +134,7 @@ void test_opt() {
 
 }
 
+// Exercises scalar and sliced views into shared tensor storage.
 void test_views() {
 	Tensor<int> t({ 3, 3, 3 }, 1, 27);
 	std::cout << "t: " << t.to_string() << '\n';
@@ -138,6 +147,7 @@ void test_views() {
 	std::cout << "tt: " << tt.to_string() << std::endl;
 }
 
+// Runs the interactive tensor demonstration suite.
 int main() {
 
 	test_basics();

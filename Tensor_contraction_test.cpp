@@ -10,11 +10,13 @@
 
 size_t passed_tests = 0;
 
+// Throws with a diagnostic message when a test condition fails.
 void require(bool condition, const std::string& message) {
 	if (!condition)
 		throw std::runtime_error(message);
 }
 
+// Returns the element count represented by a tensor shape.
 size_t tensor_size(const std::vector<size_t>& dims) {
 	size_t size = 1;
 	for (size_t dim : dims)
@@ -22,6 +24,7 @@ size_t tensor_size(const std::vector<size_t>& dims) {
 	return size;
 }
 
+// Decodes a row-major position into a multidimensional index.
 std::vector<size_t> decode_index(size_t pos, const std::vector<size_t>& dims) {
 	std::vector<size_t> index(dims.size());
 	for (size_t i = dims.size(); i > 0; i--) {
@@ -31,6 +34,7 @@ std::vector<size_t> decode_index(size_t pos, const std::vector<size_t>& dims) {
 	return index;
 }
 
+// Encodes a multidimensional index as a row-major position.
 size_t encode_index(const std::vector<size_t>& index, const std::vector<size_t>& dims) {
 	size_t pos = 0;
 	for (size_t i = 0; i < dims.size(); i++)
@@ -38,31 +42,37 @@ size_t encode_index(const std::vector<size_t>& index, const std::vector<size_t>&
 	return pos;
 }
 
+// Returns exact-comparison tolerance for integral element types.
 template<typename F>
 double tolerance() {
 	return 0.0;
 }
 
+// Returns comparison tolerance for float elements.
 template<>
 double tolerance<float>() {
 	return 1e-5;
 }
 
+// Returns comparison tolerance for double elements.
 template<>
 double tolerance<double>() {
 	return 1e-12;
 }
 
+// Returns comparison tolerance for complex-float elements.
 template<>
 double tolerance<std::complex<float>>() {
 	return 1e-5;
 }
 
+// Returns comparison tolerance for complex-double elements.
 template<>
 double tolerance<std::complex<double>>() {
 	return 1e-12;
 }
 
+// Compares two values using type-appropriate relative tolerance.
 template<typename F>
 bool is_close(F left, F right) {
 	double dif = static_cast<double>(std::abs(left - right));
@@ -71,17 +81,20 @@ bool is_close(F left, F right) {
 	return dif <= tolerance<F>() * scale;
 }
 
+// Produces a deterministic scalar test value for an index and seed.
 template<typename F>
 F test_value(size_t i, int seed) {
 	int value = static_cast<int>((i * 7 + seed * 3) % 17) - 8;
 	return static_cast<F>(value) / static_cast<F>(4);
 }
 
+// Produces a deterministic integer test value for an index and seed.
 template<>
 int test_value<int>(size_t i, int seed) {
 	return static_cast<int>((i * 7 + seed * 3) % 17) - 8;
 }
 
+// Produces a deterministic complex-float test value.
 template<>
 std::complex<float> test_value<std::complex<float>>(size_t i, int seed) {
 	float real = static_cast<float>(static_cast<int>((i * 5 + seed) % 11) - 5) / 3.0f;
@@ -89,6 +102,7 @@ std::complex<float> test_value<std::complex<float>>(size_t i, int seed) {
 	return { real, imag };
 }
 
+// Produces a deterministic complex-double test value.
 template<>
 std::complex<double> test_value<std::complex<double>>(size_t i, int seed) {
 	double real = static_cast<double>(static_cast<int>((i * 5 + seed) % 11) - 5) / 3.0;
@@ -96,6 +110,7 @@ std::complex<double> test_value<std::complex<double>>(size_t i, int seed) {
 	return { real, imag };
 }
 
+// Builds deterministic test data of the requested size.
 template<typename F>
 std::vector<F> make_values(size_t size, int seed) {
 	std::vector<F> values(size);
@@ -104,6 +119,7 @@ std::vector<F> make_values(size_t size, int seed) {
 	return values;
 }
 
+// Compares optimized contraction output with a direct reference calculation.
 template<typename F>
 void verify_contraction(const Tensor<F>& left, const std::vector<size_t>& left_dims,
 	const std::vector<F>& left_values, unsigned li, const Tensor<F>& right,
@@ -150,6 +166,7 @@ void verify_contraction(const Tensor<F>& left, const std::vector<size_t>& left_d
 	passed_tests++;
 }
 
+// Tests every compatible contraction-axis pair for two tensor ranks.
 template<typename F>
 void test_axis_pairs(const std::vector<size_t>& left_dims,
 	const std::vector<size_t>& right_base_dims, const std::string& name) {
@@ -167,6 +184,7 @@ void test_axis_pairs(const std::vector<size_t>& left_dims,
 	}
 }
 
+// Verifies contractions performed on shared tensor views.
 template<typename F>
 void test_views(const std::string& name) {
 	std::vector<size_t> left_base_dims{ 2, 2, 3, 4 };
@@ -183,6 +201,7 @@ void test_views(const std::string& name) {
 		right_view, { 5, 3, 6 }, right_values, 1, name);
 }
 
+// Verifies rank-one contraction as a dot product.
 template<typename F>
 void test_dot_product(const std::string& name) {
 	std::vector<size_t> dims{ 7 };
@@ -194,6 +213,7 @@ void test_dot_product(const std::string& name) {
 		right, dims, right_values, 0, name);
 }
 
+// Verifies dimension, axis, and empty-input validation behavior.
 void test_invalid_inputs() {
 	Tensor<int> left({ 2, 3 }, 1);
 	Tensor<int> right({ 4, 2 }, 1);
@@ -221,6 +241,7 @@ void test_invalid_inputs() {
 	passed_tests += 3;
 }
 
+// Runs the complete generic or BLAS-backed contraction test suite.
 int main() {
 	try {
 		test_axis_pairs<int>({ 2, 3, 4 }, { 5, 6, 7 }, "rank-3 int");

@@ -25,8 +25,7 @@
 #define LOG(s)
 #endif
 
-
-
+// Combines the uncontracted left and right indices into one output index.
 inline void comp_index(size_t l_index[], size_t r_index[], size_t index[],
 	unsigned l_rank, unsigned r_rank, unsigned l_i, unsigned r_i)
 {
@@ -41,6 +40,7 @@ inline void comp_index(size_t l_index[], size_t r_index[], size_t index[],
 		}
 }
 
+// Splits an output index into left and right indices around contracted axes.
 inline void decomp_index(size_t index[], size_t l_index[], size_t r_index[],
 	unsigned l_rank, unsigned r_rank, unsigned l_i, unsigned r_i)
 {
@@ -67,27 +67,32 @@ inline void decomp_index(size_t index[], size_t l_index[], size_t r_index[],
 	}
 }
 
+// Formats a complex value for tensor display.
 template<typename F>
 inline std::string to_str(std::complex<F> c) {
 	return std::to_string(c.real()) + "+" + std::to_string(c.imag()) + "i";
 }
 
+// Formats a scalar value for tensor display.
 template<typename F>
 inline std::string to_str(F f) {
 	return std::to_string(f);
 }
 
+// Reports whether matrix dimensions fit the integer BLAS interface.
 inline bool blas_size_supported(size_t m, size_t k, size_t n) {
 	size_t max_size = static_cast<size_t>(std::numeric_limits<int>::max());
 	return m <= max_size && k <= max_size && n <= max_size;
 }
 
+// Declines BLAS dispatch for unsupported element types.
 template<typename F>
 inline bool blas_matrix_product(const F*, const F*, F*, size_t, size_t, size_t) {
 	return false;
 }
 
 #ifdef TENSOR_USE_BLAS
+// Multiplies float matrices through the configured CBLAS implementation.
 inline bool blas_matrix_product(const float* left, const float* right, float* out,
 	size_t m, size_t k, size_t n) {
 	if (!blas_size_supported(m, k, n))
@@ -99,6 +104,7 @@ inline bool blas_matrix_product(const float* left, const float* right, float* ou
 	return true;
 }
 
+// Multiplies double matrices through the configured CBLAS implementation.
 inline bool blas_matrix_product(const double* left, const double* right, double* out,
 	size_t m, size_t k, size_t n) {
 	if (!blas_size_supported(m, k, n))
@@ -110,6 +116,7 @@ inline bool blas_matrix_product(const double* left, const double* right, double*
 	return true;
 }
 
+// Multiplies complex-float matrices through the configured CBLAS implementation.
 inline bool blas_matrix_product(const std::complex<float>* left,
 	const std::complex<float>* right, std::complex<float>* out,
 	size_t m, size_t k, size_t n) {
@@ -124,6 +131,7 @@ inline bool blas_matrix_product(const std::complex<float>* left,
 	return true;
 }
 
+// Multiplies complex-double matrices through the configured CBLAS implementation.
 inline bool blas_matrix_product(const std::complex<double>* left,
 	const std::complex<double>* right, std::complex<double>* out,
 	size_t m, size_t k, size_t n) {
@@ -138,9 +146,7 @@ inline bool blas_matrix_product(const std::complex<double>* left,
 	return true;
 }
 #endif
-
-
-
+// Represents an owned tensor or a shared view over contiguous tensor data.
 template<typename F = float>
 class Tensor {
 
@@ -155,6 +161,7 @@ private:
 	bool view = false;
 
 
+	// Returns this tensor to its empty state and releases its resources.
 	inline void reset() {
 		rank = 0;
 		size = 0;
@@ -167,6 +174,7 @@ private:
 		data.release();
 	}
 
+	// Initializes tensor shape metadata from dimensions and rank.
 	inline void init(const size_t* t_dim, unsigned t_rank)
 	{
 		if (!t_rank) {
@@ -189,23 +197,27 @@ private:
 		size *= dim[0];
 	}
 
+	// Initializes tensor shape metadata from a dimension list.
 	inline void init(const std::initializer_list<size_t>& dim_l) {
 		init(dim_l.begin(), dim_l.size());
 	}
 
 public:
 
+	// Creates an empty tensor.
 	Tensor()
 	{
 		LOG("tns cns, dfl " << this << " : " << meta);
 	}
 
+	// Creates an empty tensor with metadata text.
 	Tensor(const std::string& meta_str)
 	{
 		set_meta(meta_str);
 		LOG("tns cns, mta " << this << " : " << meta);
 	}
 
+	// Creates an uninitialized rank-one tensor of the requested size.
 	Tensor(size_t size) {
 		if (size) {
 			size_t dim[] = { size };
@@ -215,6 +227,7 @@ public:
 		LOG("tns cns, siz " << this << " : " << meta);
 	}
 
+	// Releases tensor shape metadata and its payload reference.
 	~Tensor()
 	{
 		data.release();
@@ -223,7 +236,7 @@ public:
 		LOG("tns dst,     " << this << " : " << meta);
 	}
 
-	// copy constructor
+	// Copies owned tensors deeply while preserving shared view semantics.
 	Tensor(const Tensor<F>& rhs) {
 		if (rhs.size) {
 			rank = rhs.rank;
@@ -245,7 +258,7 @@ public:
 		LOG("tns cns, cop " << &rhs << " -> " << this << " : " << meta);
 	}
 	
-	// copy assignment
+	// Copies tensor values or initializes this tensor from another tensor.
 	Tensor<F>& operator=(const Tensor<F>& rhs) {
 		if (this == &rhs)
 			return *this;
@@ -281,7 +294,7 @@ public:
 		return *this;
 	}
 
-	// move constructor
+	// Transfers tensor shape and payload resources from another tensor.
 	Tensor(Tensor<F>&& rhs) noexcept {
 		rank = rhs.rank;
 		size = rhs.size;
@@ -304,7 +317,7 @@ public:
 
 	}
 	
-	// move assignement
+	// Moves resources into an empty tensor or values into existing storage.
 	Tensor<F>& operator=(Tensor<F>&& rhs) {
 		if (this == &rhs)
 			return *this;
@@ -342,6 +355,7 @@ public:
 		return *this;
 	}
 
+	// Creates a rank-one tensor that shares an existing payload.
 	Tensor(const Payload<F>& data) : data(data) {
 		if (data.get_size()) {
 			size_t dim[] = { data.get_size() };
@@ -350,6 +364,7 @@ public:
 		LOG("tns cns, pyl " << this << " : " << meta);
 	}
 
+	// Creates a zero-filled tensor with the requested shape.
 	Tensor(const size_t dim[], unsigned rank) {
 		init(dim, rank);
 		if (size) {
@@ -359,6 +374,7 @@ public:
 		LOG("tns cns, dr0 " << this << " : " << meta);
 	}
 
+	// Creates a shaped tensor backed by an existing payload.
 	Tensor(const size_t dim[], unsigned rank, const Payload<F>& t_data) {
 		init(dim, rank);
 		if (size <= t_data.get_size()) {
@@ -371,6 +387,7 @@ public:
 		LOG("tns cns, drP " << this << " : " << meta);
 	}
 
+	// Creates a tensor filled with a constant value.
 	Tensor(const size_t dim[], unsigned rank, F value) {
 		init(dim, rank);
 		if (size) {
@@ -382,6 +399,7 @@ public:
 
 	}
 
+	// Creates a tensor by copying values from an array.
 	Tensor(const size_t dim[], unsigned rank, const F* array) {
 		init(dim, rank);
 		if (size) {
@@ -394,6 +412,7 @@ public:
 
 	}
 
+	// Creates a tensor filled by repeatedly calling a generator function.
 	Tensor(const size_t dim[], unsigned rank, F(*rnd)(void)) {
 		init(dim, rank);
 		if (size) {
@@ -407,6 +426,7 @@ public:
 
 	}
 
+	// Creates a tensor filled with evenly spaced values.
 	Tensor(const size_t dim[], unsigned rank, F start, F end) {
 		init(dim, rank);
 		if (size) {
@@ -416,23 +436,30 @@ public:
 		LOG("tns cns, drl " << this << " : " << meta);
 	}
 
+	// Creates a zero-filled tensor from a dimension list.
 	Tensor(const std::initializer_list<size_t>& dim_l) : Tensor(dim_l.begin(), dim_l.size()) {}
 
+	// Creates a constant-filled tensor from a dimension list.
 	Tensor(const std::initializer_list<size_t>& dim_l, F value) : Tensor(dim_l.begin(), dim_l.size(), value) {
 	}
 
+	// Creates a tensor from a dimension list and existing payload.
 	Tensor(const std::initializer_list<size_t>& dim_l, const Payload<F>& data) : Tensor(dim_l.begin(), dim_l.size(), data) {
 	}
 
+	// Creates a generated tensor from a dimension list.
 	Tensor(const std::initializer_list<size_t>& dim_l, F(*rnd)(void)) : Tensor(dim_l.begin(), dim_l.size(), rnd) {
 	}
 
+	// Creates a tensor from a dimension list and copied array values.
 	Tensor(const std::initializer_list<size_t>& dim_l, const F arr[]) : Tensor(dim_l.begin(), dim_l.size(), arr) {
 	}
 
+	// Creates a linearly spaced tensor from a dimension list.
 	Tensor(const std::initializer_list<size_t>& dim_l, F start, F end) : Tensor(dim_l.begin(), dim_l.size(), start, end)
 	{}
 
+	// Returns an independent deep copy of this tensor.
 	Tensor<F> copy() {
 		Tensor<F> out;
 		if (size) {
@@ -448,6 +475,7 @@ public:
 		return out;
 	}
 
+	// Changes the tensor shape while preserving its element count.
 	Tensor<F>& reshape(const size_t new_dim[], unsigned new_rank) {
 		if (!new_rank) {
 			if (!rank)
@@ -479,10 +507,12 @@ public:
 		return *this;
 	}
 
+	// Changes the tensor shape using a dimension list.
 	Tensor<F>& reshape(const std::initializer_list<size_t>& dim_l) {
 		return reshape(dim_l.begin(), dim_l.size());
 	}
 
+	// Returns the element-wise sum of equally shaped tensors.
 	Tensor<F> operator+(const Tensor<F>& rhs) const {
 		if ((rank != rhs.rank) || memcmp(dim, rhs.dim, rank * sizeof(size_t)))
 			throw std::invalid_argument(" + : incompatible dimensions.");
@@ -493,6 +523,7 @@ public:
 		return out;
 	}
 
+	// Returns the element-wise difference of equally shaped tensors.
 	Tensor<F> operator-(const Tensor<F>& rhs) const {
 		if ((rank != rhs.rank) || memcmp(dim, rhs.dim, rank * sizeof(size_t)))
 			throw std::invalid_argument(" - : incompatible dimensions.");
@@ -502,6 +533,7 @@ public:
 		return out;
 	}
 
+	// Returns the element-wise product of equally shaped tensors.
 	Tensor<F> operator*(const Tensor<F>& rhs) const {
 		if ((rank != rhs.rank) || memcmp(dim, rhs.dim, rank * sizeof(size_t)))
 			throw std::invalid_argument(" * : incompatible dimensions.");
@@ -511,6 +543,7 @@ public:
 		return out;
 	}
 
+	// Returns the element-wise quotient of equally shaped tensors.
 	Tensor<F> operator/(const Tensor<F>& rhs) const {
 		if ((rank != rhs.rank) || memcmp(dim, rhs.dim, rank * sizeof(size_t)))
 			throw std::invalid_argument(" / : incompatible dimensions.");
@@ -520,6 +553,7 @@ public:
 		return out;
 	}
 
+	// Adds an equally shaped tensor to this tensor in place.
 	Tensor<F>& operator+=(Tensor<F>& rhs) {
 		if (this != &rhs && ((rank != rhs.rank) || memcmp(dim, rhs.dim, rank * sizeof(size_t))))
 			throw std::invalid_argument(" += : incompatible dimensions.");
@@ -530,6 +564,7 @@ public:
 		return *this;
 	}
 
+	// Subtracts an equally shaped tensor from this tensor in place.
 	Tensor<F>& operator-=(Tensor<F>& rhs) {
 		if (this != &rhs && ((rank != rhs.rank) || memcmp(dim, rhs.dim, rank * sizeof(size_t))))
 			throw std::invalid_argument(" -= : incompatible dimensions.");
@@ -541,6 +576,7 @@ public:
 
 	}
 
+	// Multiplies this tensor by an equally shaped tensor in place.
 	Tensor<F>& operator*=(Tensor<F>& rhs) {
 		if (this != &rhs && ((rank != rhs.rank) || memcmp(dim, rhs.dim, rank * sizeof(size_t))))
 			throw std::invalid_argument(" *= : incompatible dimensions.");
@@ -551,6 +587,7 @@ public:
 		return *this;
 	}
 
+	// Returns a tensor with every element multiplied by a scalar.
 	Tensor<F> operator*(F rhs) const {
 		Tensor<F> out{ dim, rank };
 		for (size_t i = 0; i < size; i++)
@@ -558,6 +595,7 @@ public:
 		return out;
 	}
 
+	// Returns a tensor with a scalar added to every element.
 	Tensor<F> operator+(F rhs) const {
 		Tensor<F> out{ dim, rank };
 		for (size_t i = 0; i < size; i++)
@@ -565,6 +603,7 @@ public:
 		return out;
 	}
 
+	// Returns a tensor with every element divided by a scalar.
 	Tensor<F> operator/(F rhs) const {
 		Tensor<F> out{ dim, rank };
 		for (size_t i = 0; i < size; i++)
@@ -572,6 +611,7 @@ public:
 		return out;
 	}
 
+	// Returns a tensor with a scalar subtracted from every element.
 	Tensor<F> operator-(F rhs) const {
 		Tensor<F> out{ dim, rank };
 		for (size_t i = 0; i < size; i++)
@@ -579,6 +619,7 @@ public:
 		return out;
 	}
 
+	// Multiplies every element by a scalar in place.
 	Tensor<F>& operator*=(F value) {
 		for (size_t i = 0; i < size; i++)
 			data[i + off] *= value;
@@ -586,6 +627,7 @@ public:
 		return *this;
 	}
 
+	// Adds a scalar to every element in place.
 	Tensor<F>& operator+=(F value) {
 		for (size_t i = 0; i < size; i++)
 			data[i + off] += value;
@@ -593,6 +635,7 @@ public:
 		return *this;
 	}
 
+	// Divides every element by a scalar in place.
 	Tensor<F>& operator/=(F value) {
 		for (size_t i = 0; i < size; i++)
 			data[i + off] /= value;
@@ -600,6 +643,7 @@ public:
 		return *this;
 	}
 
+	// Subtracts a scalar from every element in place.
 	Tensor<F>& operator-=(F value) {
 		for (size_t i = 0; i < size; i++)
 			data[i + off] -= value;
@@ -607,6 +651,7 @@ public:
 		return *this;
 	}
 
+	// Assigns one scalar value to every tensor element.
 	Tensor<F>& operator=(F value) {
 		for (size_t i = 0; i < size; i++)
 			data[i + off] = value;
@@ -615,6 +660,7 @@ public:
 	}
 
 
+	// Reports whether equally shaped tensors match within a tolerance.
 	bool is_close_to(const Tensor<F>& rhs, F eps) const {
 		if (this == &rhs)
 			return true;
@@ -629,6 +675,7 @@ public:
 	}
 
 
+	// Formats tensor shape, metadata, and values as text.
 	std::string to_string() const {
 		std::string out = "Rank " + std::to_string(rank) + " Tensor, dims: ";
 		if (!rank) {
@@ -664,28 +711,34 @@ public:
 		return out;
 	}
 
+	// Returns the number of tensor dimensions.
 	unsigned get_rank(void) const {
 		return rank;
 	}
 
+	// Returns the total number of tensor elements.
 	size_t get_size(void) const {
 		return size;
 	}
 
+	// Copies the tensor dimensions into a caller-provided array.
 	void get_dim(size_t cap[]) const {
 		memcpy(cap, this->dim, rank * sizeof(size_t));
 	}
 
+	// Returns a shared reference to the underlying payload.
 	Payload<F> get_data() const {
 		return data;
 	}
 
+	// Applies a unary function to every tensor element in place.
 	Tensor<F>& apply(F(*func)(F)) {
 		for (size_t i = 0; i < size; i++)
 			data[i + off] = func(data[i + off]);
 		return *this;
 	}
 
+	// Returns a shared view selected by the first-axis index.
 	Tensor<F> operator[](size_t i) const {
 		if (!rank || i >= dim[0])
 			return Tensor<F>();
@@ -715,6 +768,7 @@ public:
 
 	}
 
+	// Returns a shared view selected by a leading index list.
 	Tensor<F> operator[](const std::initializer_list<size_t>& index) {
 		if (rank < index.size() || !rank)
 			return Tensor<F>();
@@ -755,10 +809,12 @@ public:
 
 private:
 
+	// Rejects direct element lookup because it is not implemented.
 	inline F& elm(size_t) {
 		throw std::logic_error("elm : not implemented.");
 	}
 
+	// Reports whether every coordinate lies within the tensor shape.
 	inline bool check_index(size_t index[]) {
 		if (!rank)
 			return false;
@@ -770,6 +826,7 @@ private:
 		return true;
 	}
 
+	// Advances a multidimensional index in row-major order.
 	inline bool inc_index(size_t index[]) const {
 		if (!rank || !size)
 			return false;
@@ -782,6 +839,7 @@ private:
 		return true;
 	}
 
+	// Converts a multidimensional index to its payload position.
 	inline size_t index_to_pos(size_t index[]) const {
 		size_t pos = off;
 		for (unsigned r = 0; r < rank; r++) {
@@ -790,6 +848,7 @@ private:
 		return pos;
 	}
 
+	// Converts a payload position to a multidimensional index.
 	inline void pos_to_index(size_t pos, size_t index[]) const {
 		//if (i >= size)
 		//	throw std::invalid_argument("Out of bound index.");
@@ -803,7 +862,7 @@ private:
 	}
 
 public:
-	// Tensor contraction
+	// Contracts one axis from each tensor through packed matrix multiplication.
 	static Tensor<F> cnt(const Tensor<F>& lt, const Tensor<F>& rt, unsigned li, unsigned ri) {
 
 		Tensor<F> out("cnt(" + lt.get_meta() + ":" + rt.get_meta() + ");");
@@ -874,28 +933,34 @@ public:
 		return out;
 	}
 
+	// Contracts this tensor's last axis with another tensor's first axis.
 	Tensor<F> operator%(const Tensor<F>& rhs) {
 		return cnt(*this, rhs, rank - 1, 0);
 	}
 
+	// Replaces tensor metadata from a C string.
 	void set_meta(const char* meta_str) {
 		strncpy(meta, meta_str, 63);
 		meta[63] = 0;
 	}
 
+	// Replaces tensor metadata from a string.
 	void set_meta(const std::string& meta_str) {
 		set_meta(meta_str.c_str());
 	}
 
+	// Returns the tensor metadata text.
 	std::string get_meta(void) const {
 		return std::string(meta);
 	}
 
+	// Appends text to the tensor metadata.
 	void append_meta(const std::string& mt_str) {
 		set_meta(get_meta() + mt_str);
 	}
 
 
+	// Creates a rank-one tensor containing a half-open arithmetic sequence.
 	static Tensor<F> range(F start, F end, F jump = 1) {
 		if (!jump || (end <= start && jump > 0) || (end >= start && jump < 0))
 			return Tensor<F>();
@@ -907,6 +972,7 @@ public:
 		return out;
 	}
 
+	// Creates a rank-one tensor of evenly spaced endpoint-inclusive values.
 	static Tensor<F> linspace(F start, F end, size_t size) {
 		if (!size || (size == 1 && start != end))
 			return Tensor<F>();
