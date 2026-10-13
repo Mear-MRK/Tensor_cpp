@@ -6,7 +6,7 @@ This project provides an implementation of a Tensor library in C++. It includes 
 ## Features
 
 - **Tensor Class**: Supports multi-dimensional arrays with various mathematical operations.
-- **Payload Class**: Manages underlying data with manual atomic reference counting and type-safe memory operations.
+- **Payload Class**: Manages underlying arrays with `std::shared_ptr<F[]>` and type-safe memory operations.
 - **Memory Management**: Uses direct construction, movable ownership, and shared immutable shape metadata for allocation-free slicing.
 - **Explicit Views**: Mutable slicing returns `Tensor::View`; slicing a const tensor returns `Tensor::ConstView`.
 - **Callable Support**: Generated-value constructors and `apply()` accept function objects and capturing lambdas.
@@ -14,6 +14,8 @@ This project provides an implementation of a Tensor library in C++. It includes 
 - **Optimized Contraction**: Reorders contracted axes into matrices and uses matrix multiplication.
 - **Optional BLAS**: Uses a CBLAS-compatible library when enabled, with an automatic built-in fallback.
 - **Debugging**: Debugging support with logging enabled via the library-specific `TENSOR_DEBUG` definition.
+
+The standard shared-pointer control blocks make ownership operations safe across threads. Concurrent writes to tensor elements still require synchronization by the caller.
 
 ## Performance Note
 
@@ -106,7 +108,7 @@ Other element types and matrix dimensions larger than the BLAS integer interface
 
 `Tensor_contraction_test.cpp` compares the matrix-product implementation with an independent generic contraction. It covers all contraction-axis combinations for rank-3 and rank-4 tensors, integer, floating-point and complex element types, tensor views with nonzero offsets, vector dot products, invalid dimensions, invalid axes, and empty inputs.
 
-`Tensor_refactor_test.cpp` covers owned and view assignment, overlapping copies, non-trivial payload types, const views, atomic reference counting, dimension overflow, reshape exception safety, and shared view-shape lifetime.
+`Tensor_refactor_test.cpp` covers owned and view assignment, overlapping copies, non-trivial payload types, const views, concurrent shared ownership, dimension overflow, reshape exception safety, and shared view-shape lifetime.
 
 Run the dependency-free tests:
 

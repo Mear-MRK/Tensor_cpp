@@ -1,6 +1,5 @@
 #pragma once
 #include <algorithm>
-#include <atomic>
 #include <cmath>
 #include <functional>
 #include <stdexcept>
@@ -8,6 +7,7 @@
 #include <initializer_list>
 #include <complex>
 #include <limits>
+#include <memory>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -103,12 +103,11 @@ inline bool blas_matrix_product(const std::complex<double>* left,
 }
 #endif
 
-// Stores immutable tensor dimensions and strides with thread-safe shared ownership.
+// Stores immutable tensor dimensions and strides with standard shared ownership.
 class TensorShape {
 private:
 	// Owns immutable vectors of dimensions and row-major strides.
 	struct Storage {
-		std::atomic<size_t> ref_count{ 1 };
 		std::vector<size_t> dim;
 		std::vector<size_t> jump;
 
@@ -125,22 +124,10 @@ private:
 		}
 	};
 
-	Storage* storage = nullptr;
+	std::shared_ptr<const Storage> storage;
 	unsigned first = 0;
 	unsigned rank = 0;
 	bool scalar = false;
-
-	// Increments the shared shape reference count when present.
-	void inc_ref_count() {
-		if (storage)
-			storage->ref_count.fetch_add(1, std::memory_order_relaxed);
-	}
-
-	// Decrements the shape reference count and frees unreferenced storage.
-	void dec_ref_count() {
-		if (storage && storage->ref_count.fetch_sub(1, std::memory_order_acq_rel) == 1)
-			delete storage;
-	}
 
 public:
 	// Creates an empty shape.
@@ -155,33 +142,20 @@ public:
 		for (unsigned i = 0; i < t_rank; i++)
 			if (!dimensions[i])
 				return;
-		storage = new Storage(dimensions, t_rank);
+		storage = std::make_shared<Storage>(dimensions, t_rank);
 		rank = t_rank;
 	}
 
 	// Shares immutable shape storage with another shape.
-	TensorShape(const TensorShape& oth)
-		: storage(oth.storage), first(oth.first), rank(oth.rank), scalar(oth.scalar) {
-		inc_ref_count();
-	}
+	TensorShape(const TensorShape&) = default;
 
 	// Replaces this shape with shared immutable shape storage.
-	TensorShape& operator=(const TensorShape& rhs) {
-		if (this == &rhs)
-			return *this;
-		dec_ref_count();
-		storage = rhs.storage;
-		first = rhs.first;
-		rank = rhs.rank;
-		scalar = rhs.scalar;
-		inc_ref_count();
-		return *this;
-	}
+	TensorShape& operator=(const TensorShape&) = default;
 
 	// Transfers immutable shape storage from another shape.
 	TensorShape(TensorShape&& oth) noexcept
-		: storage(oth.storage), first(oth.first), rank(oth.rank), scalar(oth.scalar) {
-		oth.storage = nullptr;
+		: storage(std::move(oth.storage)), first(oth.first), rank(oth.rank),
+		scalar(oth.scalar) {
 		oth.first = 0;
 		oth.rank = 0;
 		oth.scalar = false;
@@ -191,22 +165,18 @@ public:
 	TensorShape& operator=(TensorShape&& rhs) noexcept {
 		if (this == &rhs)
 			return *this;
-		dec_ref_count();
-		storage = rhs.storage;
+		storage = std::move(rhs.storage);
 		first = rhs.first;
 		rank = rhs.rank;
 		scalar = rhs.scalar;
-		rhs.storage = nullptr;
 		rhs.first = 0;
 		rhs.rank = 0;
 		rhs.scalar = false;
 		return *this;
 	}
 
-	// Releases the shared shape storage.
-	~TensorShape() {
-		dec_ref_count();
-	}
+	// Releases the standard shared shape reference.
+	~TensorShape() = default;
 
 	// Returns the number of represented dimensions.
 	unsigned get_rank() const {

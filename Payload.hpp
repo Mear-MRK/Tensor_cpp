@@ -1,6 +1,5 @@
 #pragma once
 #include <algorithm>
-#include <atomic>
 #include <cstddef>
 #include <cstring>
 #include <limits>
@@ -14,70 +13,38 @@ template <typename F>
 class Payload
 {
 private:
-	// Owns one reference-counted payload allocation.
-	struct Storage
+	size_t size = 0;
+	std::shared_ptr<F[]> arr;
+
+	// Allocates an array managed by a standard shared control block.
+	static std::shared_ptr<F[]> allocate(size_t t_size)
 	{
-		std::atomic<size_t> ref_count{ 1 };
-		size_t size = 0;
-		std::unique_ptr<F[]> arr;
-
-		// Allocates uninitialized storage for the requested number of values.
-		explicit Storage(size_t size) : size(size), arr(size ? new F[size] : nullptr) {}
-
-		// Allocates storage and copies values from an input array.
-		Storage(const F array[], size_t size) : Storage(size)
-		{
-			std::copy_n(array, size, arr.get());
-		}
-
-		// Allocates storage and fills it with one value.
-		Storage(size_t size, const F &value) : Storage(size)
-		{
-			std::fill_n(arr.get(), size, value);
-		}
-
-		// Allocates storage and fills it with evenly spaced values.
-		Storage(size_t size, const F &start, const F &end) : Storage(size)
-		{
-			if (size > 1)
-			{
-				F step = (end - start) / (size - 1);
-				for (size_t i = 0; i < size; i++)
-					arr[i] = start + i * step;
-			}
-			else if (size)
-			{
-				arr[0] = start;
-			}
-		}
-	};
-
-	Storage *storage = nullptr;
+		return t_size ? std::shared_ptr<F[]>(new F[t_size]) : nullptr;
+	}
 
 public:
 	// Creates an empty payload.
 	Payload() { TENSOR_LOG("pyl cns, dfl " << this); }
 
 	// Allocates an uninitialized payload with the requested size.
-	explicit Payload(size_t size)
+	explicit Payload(size_t t_size) : size(t_size), arr(allocate(t_size))
 	{
-		if (size)
-			storage = new Storage(size);
 		TENSOR_LOG("pyl cns, siz " << this);
 	}
 
 	// Copies an array into a newly allocated payload.
-	Payload(const F array[], size_t size)
+	Payload(const F array[], size_t t_size) : size(t_size), arr(allocate(t_size))
 	{
+		if (size && !array)
+			throw std::invalid_argument("payload input array cannot be null.");
 		if (size)
-			storage = new Storage(array, size);
+			std::copy_n(array, size, arr.get());
 		TENSOR_LOG("pyl cns, arr " << this);
 	}
 
 	// Shares the referenced storage with another payload.
-	Payload(const Payload<F> &oth) : storage(oth.storage)
+	Payload(const Payload<F> &oth) : size(oth.size), arr(oth.arr)
 	{
-		inc_ref_count();
 		TENSOR_LOG("pyl cns, cop " << &oth << "-c->" << this);
 	}
 
@@ -86,17 +53,16 @@ public:
 	{
 		if (this == &rhs)
 			return *this;
-		dec_ref_count();
-		storage = rhs.storage;
-		inc_ref_count();
+		size = rhs.size;
+		arr = rhs.arr;
 		TENSOR_LOG("pyl asn, cop " << &rhs << "-c=>" << this);
 		return *this;
 	}
 
 	// Transfers storage ownership from another payload.
-	Payload(Payload<F> &&oth) noexcept : storage(oth.storage)
+	Payload(Payload<F> &&oth) noexcept : size(oth.size), arr(std::move(oth.arr))
 	{
-		oth.storage = nullptr;
+		oth.size = 0;
 		TENSOR_LOG("pyl cns, mov " << &oth << "-m->" << this);
 	}
 
@@ -105,34 +71,42 @@ public:
 	{
 		if (this == &rhs)
 			return *this;
-		dec_ref_count();
-		storage = rhs.storage;
-		rhs.storage = nullptr;
+		size = rhs.size;
+		arr = std::move(rhs.arr);
+		rhs.size = 0;
 		TENSOR_LOG("pyl asn, mov " << &rhs << "-m=>" << this);
 		return *this;
 	}
 
 	// Allocates a payload and fills every element with a value.
-	Payload(size_t size, F value)
+	Payload(size_t t_size, F value) : size(t_size), arr(allocate(t_size))
 	{
 		if (size)
-			storage = new Storage(size, value);
+			std::fill_n(arr.get(), size, value);
 		TENSOR_LOG("pyl cns, szv " << this);
 	}
 
 	// Allocates a payload filled with evenly spaced values.
-	Payload(size_t size, F start, F end)
+	Payload(size_t t_size, F start, F end) : size(t_size), arr(allocate(t_size))
 	{
-		if (size)
-			storage = new Storage(size, start, end);
+		if (size > 1)
+		{
+			F step = (end - start) / (size - 1);
+			for (size_t i = 0; i < size; i++)
+				arr[i] = start + i * step;
+		}
+		else if (size)
+		{
+			arr[0] = start;
+		}
 		TENSOR_LOG("pyl cns, lin " << this);
 	}
 
 	// Releases this payload's reference to its storage.
 	void release()
 	{
-		dec_ref_count();
-		storage = nullptr;
+		arr.reset();
+		size = 0;
 	}
 
 	// Returns an independent copy of a selected data range.
@@ -175,7 +149,7 @@ public:
 		{
 			std::memmove(destination, source, cp_size * sizeof(F));
 		}
-		else if (storage == oth.storage && destination > source && destination < source + cp_size)
+		else if (arr == oth.arr && destination > source && destination < source + cp_size)
 		{
 			std::copy_backward(source, source + cp_size, destination + cp_size);
 		}
@@ -187,99 +161,90 @@ public:
 	}
 
 	// Initializes empty storage with the requested size.
-	bool init(size_t size)
+	bool init(size_t t_size)
 	{
-		if (storage)
+		if (arr)
 		{
 			TENSOR_LOG("pyl init, already initialized " << this);
 			return false;
 		}
-		if (size)
+		if (t_size)
 		{
-			storage = new Storage(size);
+			std::shared_ptr<F[]> new_arr = allocate(t_size);
+			size = t_size;
+			arr = std::move(new_arr);
 			return true;
 		}
 		return false;
 	}
 
 	// Initializes empty storage by copying an input array.
-	bool init(const F array[], size_t size)
+	bool init(const F array[], size_t t_size)
 	{
-		if (storage)
+		if (arr)
 		{
 			TENSOR_LOG("pyl init, already initialized " << this);
 			return false;
 		}
-		if (size)
+		if (t_size)
 		{
-			storage = new Storage(array, size);
+			if (!array)
+				throw std::invalid_argument("payload input array cannot be null.");
+			std::shared_ptr<F[]> new_arr = allocate(t_size);
+			std::copy_n(array, t_size, new_arr.get());
+			size = t_size;
+			arr = std::move(new_arr);
 			return true;
 		}
 		return false;
 	}
 
-	// Releases the payload's reference and destroys unshared storage.
+	// Releases the payload's standard shared array reference.
 	~Payload()
 	{
-		dec_ref_count();
 		TENSOR_LOG("pyl dst,     " << this);
 	}
 
 	// Returns the current storage reference count or -1 when empty.
 	int get_ref_count() const
 	{
-		if (storage)
-			return static_cast<int>(storage->ref_count.load(std::memory_order_acquire));
+		if (arr)
+			return static_cast<int>(arr.use_count());
 		return -1;
 	}
 
 	// Returns checked mutable access to an element.
 	inline F &operator[](size_t i)
 	{
-		if (!storage || i >= storage->size)
+		if (!arr || i >= size)
 			throw std::out_of_range("payload index is out of bounds.");
-		return storage->arr[i];
+		return arr[i];
 	}
 
 	// Returns checked immutable access to an element.
 	inline const F &operator[](size_t i) const
 	{
-		if (!storage || i >= storage->size)
+		if (!arr || i >= size)
 			throw std::out_of_range("payload index is out of bounds.");
-		return storage->arr[i];
+		return arr[i];
 	}
 
 
 	// Returns the mutable raw storage pointer.
 	inline F *get_arr()
 	{
-		return storage ? storage->arr.get() : nullptr;
+		return arr.get();
 	}
 
 	// Returns the immutable raw storage pointer.
 	inline const F *get_arr() const
 	{
-		return storage ? storage->arr.get() : nullptr;
+		return arr.get();
 	}
 
 	// Returns the number of stored elements.
 	inline size_t get_size() const
 	{
-		return storage ? storage->size : 0;
-	}
-
-private:
-	// Increments the shared storage reference count when present.
-	void inline inc_ref_count()
-	{
-		if (storage)
-			storage->ref_count.fetch_add(1, std::memory_order_relaxed);
-	}
-
-	// Decrements the reference count and frees unreferenced storage.
-	void inline dec_ref_count()
-	{
-		if (storage && storage->ref_count.fetch_sub(1, std::memory_order_acq_rel) == 1)
-			delete storage;
+		return size;
 	}
 };

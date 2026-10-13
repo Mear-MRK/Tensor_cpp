@@ -111,8 +111,8 @@ void test_generic_payload_copying() {
 	passed_refactor_tests += 3;
 }
 
-// Verifies atomic payload reference counting across independent threads.
-void test_thread_safe_reference_counting() {
+// Verifies standard shared ownership across independent threads.
+void test_thread_safe_shared_ownership() {
 	Payload<int> payload(32, 7);
 	Tensor<int> tensor = Tensor<int>::range(1, 7).reshape({ 2, 3 });
 	const Tensor<int>& const_tensor = tensor;
@@ -135,7 +135,7 @@ void test_thread_safe_reference_counting() {
 	require_refactor(valid.load(std::memory_order_relaxed),
 		"concurrent payload copies observed invalid data");
 	require_refactor(payload.get_ref_count() == 1,
-		"atomic payload reference count did not return to one");
+		"shared payload use count did not return to one");
 	passed_refactor_tests += 2;
 }
 
@@ -188,7 +188,7 @@ int main() {
 		test_view_assignment();
 		test_const_views();
 		test_generic_payload_copying();
-		test_thread_safe_reference_counting();
+		test_thread_safe_shared_ownership();
 		test_shape_safety();
 		test_shared_view_shape();
 		std::cout << "Tensor refactor tests passed: " << passed_refactor_tests << std::endl;
