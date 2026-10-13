@@ -23,9 +23,8 @@ void test_owned_assignment() {
 	Tensor<int> target({ 2 }, 9);
 	target = source;
 	require_refactor(target.get_size() == 4, "copy assignment did not replace size");
-	size_t dim[1]{};
-	target.get_dim(dim);
-	require_refactor(dim[0] == 4, "copy assignment did not replace shape");
+	require_refactor(target.dimensions() == std::vector<size_t>{ 4 },
+		"copy assignment did not replace shape");
 	source[0] = 99;
 	require_refactor(target.get_data()[0] == 1, "owned copy assignment shared payload");
 
@@ -42,7 +41,7 @@ void test_owned_assignment() {
 void test_view_assignment() {
 	Tensor<int> base = Tensor<int>::range(1, 7).reshape({ 2, 3 });
 	Tensor<int> values({ 3 }, 8);
-	Tensor<int> row = base[1];
+	auto row = base[1];
 	row = values;
 	Payload<int> data = base.get_data();
 	require_refactor(data[3] == 8 && data[4] == 8 && data[5] == 8,
@@ -162,9 +161,7 @@ void test_shape_safety() {
 		threw = true;
 	}
 	require_refactor(threw, "overflowing reshape dimensions did not throw");
-	size_t dim[2]{};
-	tensor.get_dim(dim);
-	require_refactor(dim[0] == 2 && dim[1] == 3,
+	require_refactor(tensor.dimensions() == std::vector<size_t>({ 2, 3 }),
 		"failed reshape changed tensor dimensions");
 	Payload<int> after = tensor.get_data();
 	for (size_t i = 0; i < tensor.get_size(); i++)
@@ -175,13 +172,12 @@ void test_shape_safety() {
 // Verifies shared shape lifetime when an owner is reshaped after slicing.
 void test_shared_view_shape() {
 	Tensor<int> tensor = Tensor<int>::range(1, 7).reshape({ 2, 3 });
-	Tensor<int> view = tensor[1];
+	auto view = tensor[1];
 	tensor.reshape({ 3, 2 });
-	size_t dim[1]{};
-	view.get_dim(dim);
-	require_refactor(view.get_rank() == 1 && dim[0] == 3,
+	require_refactor(view.get_rank() == 1
+		&& view.dimensions() == std::vector<size_t>{ 3 },
 		"view shape changed with owner reshape");
-	require_refactor(view.get_data()[3] == 4, "view payload changed with owner reshape");
+	require_refactor(view.get_data()[0] == 4, "view payload changed with owner reshape");
 	passed_refactor_tests += 2;
 }
 

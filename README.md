@@ -8,10 +8,12 @@ This project provides an implementation of a Tensor library in C++. It includes 
 - **Tensor Class**: Supports multi-dimensional arrays with various mathematical operations.
 - **Payload Class**: Manages underlying data with manual atomic reference counting and type-safe memory operations.
 - **Memory Management**: Uses direct construction, movable ownership, and shared immutable shape metadata for allocation-free slicing.
-- **Const Views**: Slicing a const tensor returns a read-only shared view.
+- **Explicit Views**: Mutable slicing returns `Tensor::View`; slicing a const tensor returns `Tensor::ConstView`.
+- **Callable Support**: Generated-value constructors and `apply()` accept function objects and capturing lambdas.
+- **Safe Shapes**: `dimensions()` returns a vector and `dimension(i)` performs checked indexed access.
 - **Optimized Contraction**: Reorders contracted axes into matrices and uses matrix multiplication.
 - **Optional BLAS**: Uses a CBLAS-compatible library when enabled, with an automatic built-in fallback.
-- **Debugging**: Debugging support with logging enabled via the `DEBUG` preprocessor definition.
+- **Debugging**: Debugging support with logging enabled via the library-specific `TENSOR_DEBUG` definition.
 
 ## Performance Note
 
@@ -53,6 +55,10 @@ Tensor<float> tensor2({2, 2}, -2); // 2x2 tensor initialized with -2
 
 tensor1[{1}] = 3; // Sets the 2nd row of tensor1 to 3
 
+auto row = tensor1[1]; // Mutable Tensor<float>::View sharing tensor1's storage
+const Tensor<float>& const_tensor1 = tensor1;
+auto read_only_row = const_tensor1[1]; // Tensor<float>::ConstView
+
 Tensor<float> result = tensor1 + tensor2; // Addition
 result *= 2.0; // Multiplication by scalar
 
@@ -62,14 +68,22 @@ bool b = res.is_close_to(res2, 1e-7); // True
 
 auto res3 = result.copy(); // Cloning result
 
-res3.apply(func);  // Applying element-wise function 'float func(float)' to res3
+float offset = 2.0f;
+res3.apply([offset](float value) { return value + offset; });
+
+std::vector<size_t> shape = res3.dimensions();
+size_t first_dimension = res3.dimension(0);
 ```
 
-Enable debugging by defining the `DEBUG` preprocessor directive:
+Enable debugging by defining `TENSOR_DEBUG` before including the header or on the compiler command line:
 
 ```cpp
-#define DEBUG 1
+#define TENSOR_DEBUG 1
 #include "Tensor.hpp"
+```
+
+```bash
+c++ -std=c++17 -DTENSOR_DEBUG your_program.cpp
 ```
 
 ## Optional BLAS Acceleration
@@ -88,6 +102,8 @@ Other element types and matrix dimensions larger than the BLAS integer interface
 
 ## Tests
 
+`Tensor_test.cpp` is a non-interactive assertion-based suite for construction, all arithmetic operators, const and temporary compound operands, capturing callables, mutable and const views, safe shape access, metadata, copies, and exception paths.
+
 `Tensor_contraction_test.cpp` compares the matrix-product implementation with an independent generic contraction. It covers all contraction-axis combinations for rank-3 and rank-4 tensors, integer, floating-point and complex element types, tensor views with nonzero offsets, vector dot products, invalid dimensions, invalid axes, and empty inputs.
 
 `Tensor_refactor_test.cpp` covers owned and view assignment, overlapping copies, non-trivial payload types, const views, atomic reference counting, dimension overflow, reshape exception safety, and shared view-shape lifetime.
@@ -95,6 +111,9 @@ Other element types and matrix dimensions larger than the BLAS integer interface
 Run the dependency-free tests:
 
 ```bash
+c++ -std=c++17 -Wall -Wextra -Wpedantic Tensor_test.cpp -o tensor_test
+./tensor_test
+
 c++ -std=c++17 -Wall -Wextra -Wpedantic Tensor_contraction_test.cpp -o tensor_contraction_test
 ./tensor_contraction_test
 ```

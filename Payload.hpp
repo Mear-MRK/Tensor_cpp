@@ -3,17 +3,11 @@
 #include <atomic>
 #include <cstddef>
 #include <cstring>
-#include <iostream>
 #include <limits>
 #include <memory>
 #include <stdexcept>
 #include <type_traits>
-
-#ifdef DEBUG
-#define LOG(s) std::cout << s << std::endl
-#else
-#define LOG(s)
-#endif
+#include "TensorDebug.hpp"
 
 // Manages a reference-counted contiguous array of values.
 template <typename F>
@@ -62,14 +56,14 @@ private:
 
 public:
 	// Creates an empty payload.
-	Payload() { LOG("pyl cns, dfl " << this); }
+	Payload() { TENSOR_LOG("pyl cns, dfl " << this); }
 
 	// Allocates an uninitialized payload with the requested size.
 	explicit Payload(size_t size)
 	{
 		if (size)
 			storage = new Storage(size);
-		LOG("pyl cns, siz " << this);
+		TENSOR_LOG("pyl cns, siz " << this);
 	}
 
 	// Copies an array into a newly allocated payload.
@@ -77,14 +71,14 @@ public:
 	{
 		if (size)
 			storage = new Storage(array, size);
-		LOG("pyl cns, arr " << this);
+		TENSOR_LOG("pyl cns, arr " << this);
 	}
 
 	// Shares the referenced storage with another payload.
 	Payload(const Payload<F> &oth) : storage(oth.storage)
 	{
 		inc_ref_count();
-		LOG("pyl cns, cop " << &oth << "-c->" << this);
+		TENSOR_LOG("pyl cns, cop " << &oth << "-c->" << this);
 	}
 
 	// Replaces this payload with shared storage from another payload.
@@ -95,7 +89,7 @@ public:
 		dec_ref_count();
 		storage = rhs.storage;
 		inc_ref_count();
-		LOG("pyl asn, cop " << &rhs << "-c=>" << this);
+		TENSOR_LOG("pyl asn, cop " << &rhs << "-c=>" << this);
 		return *this;
 	}
 
@@ -103,7 +97,7 @@ public:
 	Payload(Payload<F> &&oth) noexcept : storage(oth.storage)
 	{
 		oth.storage = nullptr;
-		LOG("pyl cns, mov " << &oth << "-m->" << this);
+		TENSOR_LOG("pyl cns, mov " << &oth << "-m->" << this);
 	}
 
 	// Replaces this payload by moving storage from another payload.
@@ -114,7 +108,7 @@ public:
 		dec_ref_count();
 		storage = rhs.storage;
 		rhs.storage = nullptr;
-		LOG("pyl asn, mov " << &rhs << "-m=>" << this);
+		TENSOR_LOG("pyl asn, mov " << &rhs << "-m=>" << this);
 		return *this;
 	}
 
@@ -123,7 +117,7 @@ public:
 	{
 		if (size)
 			storage = new Storage(size, value);
-		LOG("pyl cns, szv " << this);
+		TENSOR_LOG("pyl cns, szv " << this);
 	}
 
 	// Allocates a payload filled with evenly spaced values.
@@ -131,7 +125,7 @@ public:
 	{
 		if (size)
 			storage = new Storage(size, start, end);
-		LOG("pyl cns, lin " << this);
+		TENSOR_LOG("pyl cns, lin " << this);
 	}
 
 	// Releases this payload's reference to its storage.
@@ -197,7 +191,7 @@ public:
 	{
 		if (storage)
 		{
-			LOG("pyl init, already initialized " << this);
+			TENSOR_LOG("pyl init, already initialized " << this);
 			return false;
 		}
 		if (size)
@@ -213,7 +207,7 @@ public:
 	{
 		if (storage)
 		{
-			LOG("pyl init, already initialized " << this);
+			TENSOR_LOG("pyl init, already initialized " << this);
 			return false;
 		}
 		if (size)
@@ -228,7 +222,7 @@ public:
 	~Payload()
 	{
 		dec_ref_count();
-		LOG("pyl dst,     " << this);
+		TENSOR_LOG("pyl dst,     " << this);
 	}
 
 	// Returns the current storage reference count or -1 when empty.
@@ -239,17 +233,19 @@ public:
 		return -1;
 	}
 
-	// Returns mutable unchecked access to an element.
+	// Returns checked mutable access to an element.
 	inline F &operator[](size_t i)
 	{
-		// Doesn't check if arr is null or index out of bound
+		if (!storage || i >= storage->size)
+			throw std::out_of_range("payload index is out of bounds.");
 		return storage->arr[i];
 	}
 
-	// Returns immutable unchecked access to an element.
+	// Returns checked immutable access to an element.
 	inline const F &operator[](size_t i) const
 	{
-		// Doesn't check if arr is null or index out of bound
+		if (!storage || i >= storage->size)
+			throw std::out_of_range("payload index is out of bounds.");
 		return storage->arr[i];
 	}
 

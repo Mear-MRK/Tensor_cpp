@@ -120,9 +120,9 @@ std::vector<F> make_values(size_t size, int seed) {
 }
 
 // Compares optimized contraction output with a direct reference calculation.
-template<typename F>
-void verify_contraction(const Tensor<F>& left, const std::vector<size_t>& left_dims,
-	const std::vector<F>& left_values, unsigned li, const Tensor<F>& right,
+template<typename F, typename LeftTensor, typename RightTensor>
+void verify_contraction(const LeftTensor& left, const std::vector<size_t>& left_dims,
+	const std::vector<F>& left_values, unsigned li, const RightTensor& right,
 	const std::vector<size_t>& right_dims, const std::vector<F>& right_values,
 	unsigned ri, const std::string& name) {
 	Tensor<F> result = Tensor<F>::cnt(left, right, li, ri);
@@ -137,9 +137,7 @@ void verify_contraction(const Tensor<F>& left, const std::vector<size_t>& left_d
 		out_dims.push_back(1);
 
 	require(result.get_size() == tensor_size(out_dims), name + ": output size mismatch");
-	std::vector<size_t> result_dims(out_dims.size());
-	result.get_dim(result_dims.data());
-	require(result_dims == out_dims, name + ": output dimensions mismatch");
+	require(result.dimensions() == out_dims, name + ": output dimensions mismatch");
 
 	Payload<F> result_data = result.get_data();
 	for (size_t pos = 0; pos < result.get_size(); pos++) {
@@ -193,8 +191,8 @@ void test_views(const std::string& name) {
 	std::vector<F> right_base_values = make_values<F>(tensor_size(right_base_dims), 13);
 	Tensor<F> left_base(left_base_dims.data(), static_cast<unsigned>(left_base_dims.size()), left_base_values.data());
 	Tensor<F> right_base(right_base_dims.data(), static_cast<unsigned>(right_base_dims.size()), right_base_values.data());
-	Tensor<F> left_view = left_base[1];
-	Tensor<F> right_view = right_base[1];
+	auto left_view = left_base[1];
+	auto right_view = right_base[1];
 	std::vector<F> left_values(left_base_values.begin() + 24, left_base_values.end());
 	std::vector<F> right_values(right_base_values.begin() + 90, right_base_values.end());
 	verify_contraction(left_view, { 2, 3, 4 }, left_values, 1,

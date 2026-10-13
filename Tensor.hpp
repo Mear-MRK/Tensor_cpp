@@ -2,14 +2,13 @@
 #include <algorithm>
 #include <atomic>
 #include <cmath>
-#include <iostream>
+#include <functional>
 #include <stdexcept>
 #include <string>
-#include <cstring>
-#include <cstdio>
 #include <initializer_list>
 #include <complex>
 #include <limits>
+#include <type_traits>
 #include <utility>
 #include <vector>
 #include "Payload.hpp"
@@ -23,54 +22,6 @@
 #error TENSOR_USE_BLAS requires a CBLAS-compatible header.
 #endif
 #endif
-
-#ifdef DEBUG
-#define LOG(s) std::cout << s << std::endl
-#else
-#define LOG(s)
-#endif
-
-// Combines the uncontracted left and right indices into one output index.
-inline void comp_index(size_t l_index[], size_t r_index[], size_t index[],
-	unsigned l_rank, unsigned r_rank, unsigned l_i, unsigned r_i)
-{
-	unsigned r = 0;
-	for (unsigned i = 0; i < l_rank; i++)
-		if (i != l_i) {
-			index[r++] = l_index[i];
-		}
-	for (unsigned i = 0; i < r_rank; i++)
-		if (i != r_i) {
-			index[r++] = r_index[i];
-		}
-}
-
-// Splits an output index into left and right indices around contracted axes.
-inline void decomp_index(size_t index[], size_t l_index[], size_t r_index[],
-	unsigned l_rank, unsigned r_rank, unsigned l_i, unsigned r_i)
-{
-	unsigned i = 0;
-	while (i < l_i)
-	{
-		l_index[i] = index[i];
-		i++;
-	}
-	unsigned j = i++;
-	while (i < l_rank)
-	{
-		l_index[i++] = index[j++];
-	}
-	i = 0;
-	while (i < r_i)
-	{
-		r_index[i++] = index[j++];
-	}
-	i++;
-	while (i < r_rank)
-	{
-		r_index[i++] = index[j++];
-	}
-}
 
 // Formats a complex value for tensor display.
 template<typename F>
@@ -297,10 +248,13 @@ public:
 		return true;
 	}
 
-	// Copies the represented dimensions into caller-provided storage.
-	void copy_dimensions(size_t out[]) const {
+	// Returns the represented dimensions in a capacity-safe container.
+	std::vector<size_t> dimensions() const {
+		std::vector<size_t> out;
+		out.reserve(rank);
 		for (unsigned i = 0; i < rank; i++)
-			out[i] = dimension(i);
+			out.push_back(dimension(i));
+		return out;
 	}
 
 	// Returns a shared shape with leading dimensions removed.
@@ -322,18 +276,16 @@ public:
 	}
 };
 
-// Represents an owned tensor or a shared view over contiguous tensor data.
+// Represents an independently owned contiguous tensor.
 template<typename F = float>
 class Tensor {
 
 private:
-	char meta[64] = "";
+	std::string meta;
 	TensorShape shape;
 	unsigned rank = 0;
 	size_t size = 0;
-	size_t off = 0;
 	Payload<F> data;
-	bool view = false;
 
 	// Selects construction with allocated but uninitialized element storage.
 	struct UninitializedTag {};
@@ -346,33 +298,18 @@ private:
 		return TensorShape(dimensions, 1);
 	}
 
-	// Returns shared view storage or an independent owned copy as appropriate.
-	static Payload<F> copy_payload(const Tensor<F>& rhs) {
-		if (rhs.view)
-			return rhs.data;
-		return rhs.data.copy(rhs.off, rhs.size);
-	}
-
 	// Creates an owned tensor with uninitialized storage for a prepared shape.
 	Tensor(TensorShape t_shape, UninitializedTag)
 		: shape(std::move(t_shape)), rank(shape.get_rank()), size(shape.get_size()),
 		data(size) {}
 
-	// Creates a shared mutable view without allocating shape or payload storage.
-	Tensor(const Tensor<F>& source, TensorShape t_shape, size_t t_size, size_t t_off)
-		: shape(std::move(t_shape)), rank(shape.get_rank()), size(t_size), off(t_off),
-		data(source.data), view(true) {}
-
 	// Exchanges all tensor state without allocation.
 	void swap(Tensor<F>& oth) noexcept {
-		for (size_t i = 0; i < sizeof(meta); i++)
-			std::swap(meta[i], oth.meta[i]);
+		std::swap(meta, oth.meta);
 		std::swap(shape, oth.shape);
 		std::swap(rank, oth.rank);
 		std::swap(size, oth.size);
-		std::swap(off, oth.off);
 		std::swap(data, oth.data);
-		std::swap(view, oth.view);
 	}
 
 
@@ -380,13 +317,66 @@ private:
 	inline void reset() {
 		rank = 0;
 		size = 0;
-		off = 0;
-		view = false;
+		meta.clear();
 		shape = TensorShape();
 		data.release();
 	}
 
+	// Validates that an operand has the same tensor dimensions.
+	void require_same_shape(const Tensor<F>& rhs, const char* operation) const {
+		if (!shape.same_dimensions(rhs.shape))
+			throw std::invalid_argument(std::string(operation) + " : incompatible dimensions.");
+	}
+
+	// Creates an element-wise result from two equally shaped tensors.
+	template<typename Operation>
+	Tensor<F> binary_transform(const Tensor<F>& rhs, const char* operation,
+		Operation&& transform) const {
+		require_same_shape(rhs, operation);
+		Tensor<F> out(shape, UninitializedTag{});
+		F* out_data = out.data.get_arr();
+		const F* left_data = data.get_arr();
+		const F* right_data = rhs.data.get_arr();
+		for (size_t i = 0; i < size; i++)
+			out_data[i] = std::invoke(transform, left_data[i], right_data[i]);
+		return out;
+	}
+
+	// Creates an element-wise result from this tensor and a scalar.
+	template<typename Operation>
+	Tensor<F> scalar_transform(F value, Operation&& transform) const {
+		Tensor<F> out(shape, UninitializedTag{});
+		F* out_data = out.data.get_arr();
+		const F* source_data = data.get_arr();
+		for (size_t i = 0; i < size; i++)
+			out_data[i] = std::invoke(transform, source_data[i], value);
+		return out;
+	}
+
+	// Applies an in-place operation with an equally shaped tensor.
+	template<typename Operation>
+	Tensor<F>& binary_compound(const Tensor<F>& rhs, const char* operation,
+		Operation&& transform) {
+		require_same_shape(rhs, operation);
+		F* left_data = data.get_arr();
+		const F* right_data = rhs.data.get_arr();
+		for (size_t i = 0; i < size; i++)
+			std::invoke(transform, left_data[i], right_data[i]);
+		return *this;
+	}
+
+	// Applies an in-place operation with a scalar.
+	template<typename Operation>
+	Tensor<F>& scalar_compound(F value, Operation&& transform) {
+		F* values = data.get_arr();
+		for (size_t i = 0; i < size; i++)
+			std::invoke(transform, values[i], value);
+		return *this;
+	}
+
 public:
+	class View;
+
 	// Provides read-only access to a shared tensor slice.
 	class ConstView {
 	private:
@@ -396,6 +386,7 @@ public:
 		Payload<F> data;
 
 		friend class Tensor<F>;
+		friend class View;
 
 		// Creates a read-only view over shared tensor storage.
 		ConstView(const Payload<F>& t_data, TensorShape t_shape, size_t t_size, size_t t_off)
@@ -415,9 +406,16 @@ public:
 			return size;
 		}
 
-		// Copies the view dimensions into caller-provided storage.
-		void get_dim(size_t out[]) const {
-			shape.copy_dimensions(out);
+		// Returns all view dimensions in a capacity-safe container.
+		std::vector<size_t> dimensions() const {
+			return shape.dimensions();
+		}
+
+		// Returns one checked view dimension.
+		size_t dimension(unsigned i) const {
+			if (i >= shape.get_rank())
+				throw std::out_of_range("const tensor view dimension is out of bounds.");
+			return shape.dimension(i);
 		}
 
 		// Returns an immutable pointer to the first visible element.
@@ -469,94 +467,263 @@ public:
 		}
 	};
 
+	// Provides mutable access to a shared tensor slice without owning tensor semantics.
+	class View {
+	private:
+		TensorShape shape;
+		size_t size = 0;
+		size_t off = 0;
+		Payload<F> data;
+
+		friend class Tensor<F>;
+
+		// Creates a mutable view over shared tensor storage.
+		View(const Payload<F>& t_data, TensorShape t_shape, size_t t_size, size_t t_off)
+			: shape(std::move(t_shape)), size(t_size), off(t_off), data(t_data) {}
+
+		// Copies values from a compatible payload range into this view.
+		View& assign_values(const Payload<F>& source, const TensorShape& source_shape,
+			size_t source_size, size_t source_off) {
+			if (!shape.same_dimensions(source_shape))
+				throw std::invalid_argument("assignment to tensor view: incompatible dimensions.");
+			data.assign(source, source_off, size, off, source_size);
+			return *this;
+		}
+
+	public:
+		// Creates an empty mutable view.
+		View() = default;
+
+		// Creates another handle to the same mutable view.
+		View(const View&) = default;
+
+		// Creates another handle to the same mutable view from a temporary handle.
+		View(View&&) noexcept = default;
+
+		// Copies values from another view while preserving this view's binding.
+		View& operator=(const View& rhs) {
+			if (this == &rhs)
+				return *this;
+			return assign_values(rhs.data, rhs.shape, rhs.size, rhs.off);
+		}
+
+		// Copies values from a temporary view while preserving this view's binding.
+		View& operator=(View&& rhs) {
+			return assign_values(rhs.data, rhs.shape, rhs.size, rhs.off);
+		}
+
+		// Copies values from an owned tensor into this view.
+		View& operator=(const Tensor<F>& rhs) {
+			return assign_values(rhs.data, rhs.shape, rhs.size, 0);
+		}
+
+		// Copies values from a read-only view into this view.
+		View& operator=(const ConstView& rhs) {
+			return assign_values(rhs.data, rhs.shape, rhs.size, rhs.off);
+		}
+
+		// Assigns one scalar value to every visible element.
+		View& operator=(F value) {
+			F* values = data.get_arr();
+			if (values)
+				values += off;
+			for (size_t i = 0; i < size; i++)
+				values[i] = value;
+			return *this;
+		}
+
+		// Returns the number of view dimensions.
+		unsigned get_rank() const {
+			return shape.get_rank();
+		}
+
+		// Returns the number of visible elements.
+		size_t get_size() const {
+			return size;
+		}
+
+		// Returns all view dimensions in a capacity-safe container.
+		std::vector<size_t> dimensions() const {
+			return shape.dimensions();
+		}
+
+		// Returns one checked view dimension.
+		size_t dimension(unsigned i) const {
+			if (i >= shape.get_rank())
+				throw std::out_of_range("tensor view dimension is out of bounds.");
+			return shape.dimension(i);
+		}
+
+		// Returns a mutable pointer to the first visible element.
+		F* get_data() {
+			return data.get_arr() ? data.get_arr() + off : nullptr;
+		}
+
+		// Returns an immutable pointer to the first visible element.
+		const F* get_data() const {
+			return data.get_arr() ? data.get_arr() + off : nullptr;
+		}
+
+		// Returns a checked mutable element selected by a complete index.
+		F& at(const std::initializer_list<size_t>& index) {
+			if (index.size() != shape.get_rank())
+				throw std::out_of_range("tensor view index rank mismatch.");
+			size_t pos = off;
+			for (unsigned i = 0; i < index.size(); i++) {
+				if (index.begin()[i] >= shape.dimension(i))
+					throw std::out_of_range("tensor view index is out of bounds.");
+				pos += index.begin()[i] * shape.stride(i);
+			}
+			return data[pos];
+		}
+
+		// Returns a checked immutable element selected by a complete index.
+		const F& at(const std::initializer_list<size_t>& index) const {
+			return ConstView(data, shape, size, off).at(index);
+		}
+
+		// Returns a mutable subview selected by the first-axis index.
+		View operator[](size_t i) {
+			unsigned rank = shape.get_rank();
+			if (!rank || i >= shape.dimension(0))
+				return View();
+			if (rank == 1)
+				return View(data, shape.scalar_shape(), 1, off + i);
+			return View(data, shape.slice(1), size / shape.dimension(0),
+				off + i * shape.stride(0));
+		}
+
+		// Returns a read-only subview selected from a const view handle.
+		ConstView operator[](size_t i) const {
+			return ConstView(data, shape, size, off)[i];
+		}
+
+		// Returns a mutable subview selected by a leading index list.
+		View operator[](const std::initializer_list<size_t>& index) {
+			unsigned rank = shape.get_rank();
+			if (!rank || index.size() > rank)
+				return View();
+			for (unsigned i = 0; i < index.size(); i++)
+				if (index.begin()[i] >= shape.dimension(i))
+					return View();
+			size_t out_off = off;
+			for (unsigned i = 0; i < index.size(); i++)
+				out_off += index.begin()[i] * shape.stride(i);
+			if (index.size() == rank)
+				return View(data, shape.scalar_shape(), 1, out_off);
+			size_t out_size = size;
+			for (unsigned i = 0; i < index.size(); i++)
+				out_size /= shape.dimension(i);
+			return View(data, shape.slice(index.size()), out_size, out_off);
+		}
+
+		// Returns a read-only subview selected from a const view handle.
+		ConstView operator[](const std::initializer_list<size_t>& index) const {
+			return ConstView(data, shape, size, off)[index];
+		}
+
+		// Applies any compatible callable to every visible element in place.
+		template<typename Function,
+			typename std::enable_if<std::is_invocable_r<F, Function&, F>::value, int>::type = 0>
+		View& apply(Function&& function) {
+			F* values = data.get_arr();
+			if (values)
+				values += off;
+			for (size_t i = 0; i < size; i++)
+				values[i] = std::invoke(function, values[i]);
+			return *this;
+		}
+
+		// Returns an independent owned copy of the visible values.
+		Tensor<F> copy() const {
+			return Tensor<F>(*this);
+		}
+
+		// Formats the visible tensor shape and values as text.
+		std::string to_string() const {
+			return copy().to_string();
+		}
+	};
+
 	// Creates an empty tensor.
 	Tensor()
 	{
-		LOG("tns cns, dfl " << this << " : " << meta);
+		TENSOR_LOG("tns cns, dfl " << this << " : " << meta);
 	}
 
 	// Creates an empty tensor with metadata text.
 	Tensor(const std::string& meta_str)
 	{
 		set_meta(meta_str);
-		LOG("tns cns, mta " << this << " : " << meta);
+		TENSOR_LOG("tns cns, mta " << this << " : " << meta);
 	}
 
 	// Creates an uninitialized rank-one tensor of the requested size.
 	Tensor(size_t t_size)
 		: shape(shape_from_size(t_size)), rank(shape.get_rank()), size(shape.get_size()),
 		data(size) {
-		LOG("tns cns, siz " << this << " : " << meta);
+		TENSOR_LOG("tns cns, siz " << this << " : " << meta);
 	}
 
 	// Releases tensor shape metadata and its payload reference.
 	~Tensor()
 	{
-		LOG("tns dst,     " << this << " : " << meta);
+		TENSOR_LOG("tns dst,     " << this << " : " << meta);
 	}
 
-	// Copies owned tensors deeply while preserving shared view semantics.
+	// Creates an independent deep copy of an owned tensor.
 	Tensor(const Tensor<F>& rhs)
-		: shape(rhs.shape), rank(rhs.rank), size(rhs.size), off(rhs.view ? rhs.off : 0),
-		data(copy_payload(rhs)), view(rhs.view) {
-		set_meta(rhs.get_meta() + "Cc;");
-		LOG("tns cns, cop " << &rhs << " -> " << this << " : " << meta);
+		: meta(rhs.meta + "Cc;"), shape(rhs.shape), rank(rhs.rank), size(rhs.size),
+		data(rhs.data.copy(0, rhs.size)) {
+		TENSOR_LOG("tns cns, cop " << &rhs << " -> " << this << " : " << meta);
+	}
+
+	// Creates an independent owned tensor from a mutable view.
+	Tensor(const View& source)
+		: shape(source.shape), rank(shape.get_rank()), size(source.size),
+		data(source.data.copy(source.off, source.size)) {
+		TENSOR_LOG("tns cns, viw " << &source << " -> " << this << " : " << meta);
+	}
+
+	// Creates an independent owned tensor from a read-only view.
+	Tensor(const ConstView& source)
+		: shape(source.shape), rank(shape.get_rank()), size(source.size),
+		data(source.data.copy(source.off, source.size)) {
+		TENSOR_LOG("tns cns, cvw " << &source << " -> " << this << " : " << meta);
 	}
 	
-	// Copies values into a view or conventionally replaces an owned tensor.
+	// Replaces this owned tensor with an independent copy.
 	Tensor<F>& operator=(const Tensor<F>& rhs) {
 		if (this == &rhs)
 			return *this;
-		if (view) {
-			if (!shape.same_dimensions(rhs.shape))
-				throw std::invalid_argument("copy assignment to view: incompatible dimensions.");
-			data.assign(rhs.data, rhs.off, size, off, rhs.size);
-			append_meta("]" + rhs.get_meta() + "C=,");
-		}
-		else {
-			Tensor<F> replacement(rhs);
-			swap(replacement);
-		}
+		Tensor<F> replacement(rhs);
+		swap(replacement);
 
-		LOG("tns asn, cop " << &rhs << " -> " << this << " : " << meta);
+		TENSOR_LOG("tns asn, cop " << &rhs << " -> " << this << " : " << meta);
 
 		return *this;
 	}
 
 	// Transfers tensor shape and payload resources from another tensor.
 	Tensor(Tensor<F>&& rhs) noexcept
-		: shape(std::move(rhs.shape)), rank(rhs.rank), size(rhs.size), off(rhs.off),
-		data(std::move(rhs.data)), view(rhs.view) {
-		set_meta(rhs.meta);
-		size_t meta_length = strlen(meta);
-		strncat(meta, "Mc;", sizeof(meta) - meta_length - 1);
+		: meta(std::move(rhs.meta)), shape(std::move(rhs.shape)), rank(rhs.rank),
+		size(rhs.size), data(std::move(rhs.data)) {
 
 		rhs.rank = 0;
 		rhs.size = 0;
-		rhs.off = 0;
-		rhs.view = false;
 
-		LOG("tns cns, mov " << &rhs << " -> " << this << " : " << meta);
+		TENSOR_LOG("tns cns, mov " << &rhs << " -> " << this << " : " << meta);
 
 	}
 	
-	// Copies values into a view or transfers ownership into an owned tensor.
-	Tensor<F>& operator=(Tensor<F>&& rhs) {
+	// Transfers complete tensor ownership into this tensor.
+	Tensor<F>& operator=(Tensor<F>&& rhs) noexcept {
 		if (this == &rhs)
 			return *this;
-		if (view) {
-			if (!shape.same_dimensions(rhs.shape))
-				throw std::invalid_argument("move assignment to view: incompatible dimensions.");
-			data.assign(rhs.data, rhs.off, size, off, rhs.size);
-			rhs.reset();
-			append_meta("]M=,");
-		}
-		else {
-			Tensor<F> replacement(std::move(rhs));
-			swap(replacement);
-		}
+		Tensor<F> replacement(std::move(rhs));
+		swap(replacement);
 
-		LOG("tns asn, mov " << &rhs << " -> " << this << " : " << meta);
+		TENSOR_LOG("tns asn, mov " << &rhs << " -> " << this << " : " << meta);
 
 		return *this;
 	}
@@ -565,14 +732,14 @@ public:
 	Tensor(const Payload<F>& t_data)
 		: shape(shape_from_size(t_data.get_size())), rank(shape.get_rank()),
 		size(shape.get_size()), data(t_data) {
-		LOG("tns cns, pyl " << this << " : " << meta);
+		TENSOR_LOG("tns cns, pyl " << this << " : " << meta);
 	}
 
 	// Creates a zero-filled tensor with the requested shape.
 	Tensor(const size_t dim[], unsigned t_rank)
 		: shape(dim, t_rank), rank(shape.get_rank()), size(shape.get_size()), data(size, F{}) {
 		set_meta("0;");
-		LOG("tns cns, dr0 " << this << " : " << meta);
+		TENSOR_LOG("tns cns, dr0 " << this << " : " << meta);
 	}
 
 	// Creates a shaped tensor backed by an existing payload.
@@ -581,14 +748,14 @@ public:
 		if (size > t_data.get_size())
 			reset();
 		set_meta("drP;");
-		LOG("tns cns, drP " << this << " : " << meta);
+		TENSOR_LOG("tns cns, drP " << this << " : " << meta);
 	}
 
 	// Creates a tensor filled with a constant value.
 	Tensor(const size_t dim[], unsigned t_rank, F value)
 		: shape(dim, t_rank), rank(shape.get_rank()), size(shape.get_size()), data(size, value) {
 		set_meta(to_str(value) + ";");
-		LOG("tns cns, drv " << this << " : " << meta);
+		TENSOR_LOG("tns cns, drv " << this << " : " << meta);
 
 	}
 
@@ -598,20 +765,21 @@ public:
 		data(array, size) {
 		set_meta("array;");
 
-		LOG("tns cns, dra " << this << " : " << meta);
+		TENSOR_LOG("tns cns, dra " << this << " : " << meta);
 
 	}
 
-	// Creates a tensor filled by repeatedly calling a generator function.
-	Tensor(const size_t dim[], unsigned t_rank, F(*rnd)(void))
+	// Creates a tensor filled by repeatedly invoking any compatible generator.
+	template<typename Generator,
+		typename std::enable_if<std::is_invocable_r<F, Generator&>::value, int>::type = 0>
+	Tensor(const size_t dim[], unsigned t_rank, Generator&& generator)
 		: shape(dim, t_rank), rank(shape.get_rank()), size(shape.get_size()), data(size) {
-		if (size) {
-			for (size_t i = 0; i < size; i++)
-				data[i] = rnd();
-		}
+		F* values = data.get_arr();
+		for (size_t i = 0; i < size; i++)
+			values[i] = std::invoke(generator);
 		set_meta("rnd;");
 
-		LOG("tns cns, drr " << this << " : " << meta);
+		TENSOR_LOG("tns cns, drr " << this << " : " << meta);
 
 	}
 
@@ -620,7 +788,7 @@ public:
 		: shape(dim, t_rank), rank(shape.get_rank()), size(shape.get_size()),
 		data(size, start, end) {
 		set_meta("lin;");
-		LOG("tns cns, drl " << this << " : " << meta);
+		TENSOR_LOG("tns cns, drl " << this << " : " << meta);
 	}
 
 	// Creates a zero-filled tensor from a dimension list.
@@ -634,8 +802,11 @@ public:
 	Tensor(const std::initializer_list<size_t>& dim_l, const Payload<F>& data) : Tensor(dim_l.begin(), dim_l.size(), data) {
 	}
 
-	// Creates a generated tensor from a dimension list.
-	Tensor(const std::initializer_list<size_t>& dim_l, F(*rnd)(void)) : Tensor(dim_l.begin(), dim_l.size(), rnd) {
+	// Creates a generated tensor from a dimension list and compatible callable.
+	template<typename Generator,
+		typename std::enable_if<std::is_invocable_r<F, Generator&>::value, int>::type = 0>
+	Tensor(const std::initializer_list<size_t>& dim_l, Generator&& generator)
+		: Tensor(dim_l.begin(), dim_l.size(), std::forward<Generator>(generator)) {
 	}
 
 	// Creates a tensor from a dimension list and copied array values.
@@ -650,7 +821,7 @@ public:
 	Tensor<F> copy() const {
 		Tensor<F> out(shape, UninitializedTag{});
 		if (size)
-			std::copy_n(data.get_arr() + off, size, out.data.get_arr());
+			std::copy_n(data.get_arr(), size, out.data.get_arr());
 		return out;
 	}
 
@@ -694,149 +865,106 @@ public:
 
 	// Returns the element-wise sum of equally shaped tensors.
 	Tensor<F> operator+(const Tensor<F>& rhs) const {
-		if (!shape.same_dimensions(rhs.shape))
-			throw std::invalid_argument(" + : incompatible dimensions.");
-		Tensor<F> out(shape, UninitializedTag{});
-		for (size_t i = 0; i < size; i++)
-			out.data[i] = data[i + off] + rhs.data[i + rhs.off];
+		Tensor<F> out = binary_transform(rhs, "+",
+			[](const F& left, const F& right) { return left + right; });
 		out.append_meta("(" + get_meta() + "+" + rhs.get_meta() + "),");
 		return out;
 	}
 
 	// Returns the element-wise difference of equally shaped tensors.
 	Tensor<F> operator-(const Tensor<F>& rhs) const {
-		if (!shape.same_dimensions(rhs.shape))
-			throw std::invalid_argument(" - : incompatible dimensions.");
-		Tensor<F> out(shape, UninitializedTag{});
-		for (size_t i = 0; i < size; i++)
-			out.data[i] = data[i + off] - rhs.data[i + rhs.off];
-		return out;
+		return binary_transform(rhs, "-",
+			[](const F& left, const F& right) { return left - right; });
 	}
 
 	// Returns the element-wise product of equally shaped tensors.
 	Tensor<F> operator*(const Tensor<F>& rhs) const {
-		if (!shape.same_dimensions(rhs.shape))
-			throw std::invalid_argument(" * : incompatible dimensions.");
-		Tensor<F> out(shape, UninitializedTag{});
-		for (size_t i = 0; i < size; i++)
-			out.data[i] = data[i + off] * rhs.data[i + rhs.off];
-		return out;
+		return binary_transform(rhs, "*",
+			[](const F& left, const F& right) { return left * right; });
 	}
 
 	// Returns the element-wise quotient of equally shaped tensors.
 	Tensor<F> operator/(const Tensor<F>& rhs) const {
-		if (!shape.same_dimensions(rhs.shape))
-			throw std::invalid_argument(" / : incompatible dimensions.");
-		Tensor<F> out(shape, UninitializedTag{});
-		for (size_t i = 0; i < size; i++)
-			out.data[i] = data[i + off] / rhs.data[i + rhs.off];
-		return out;
+		return binary_transform(rhs, "/",
+			[](const F& left, const F& right) { return left / right; });
 	}
 
 	// Adds an equally shaped tensor to this tensor in place.
 	Tensor<F>& operator+=(const Tensor<F>& rhs) {
-		if (this != &rhs && !shape.same_dimensions(rhs.shape))
-			throw std::invalid_argument(" += : incompatible dimensions.");
-
-		for (size_t i = 0; i < size; i++)
-			data[i + off] += rhs.data[i + rhs.off];
-
-		return *this;
+		return binary_compound(rhs, "+=",
+			[](F& left, const F& right) { left += right; });
 	}
 
 	// Subtracts an equally shaped tensor from this tensor in place.
 	Tensor<F>& operator-=(const Tensor<F>& rhs) {
-		if (this != &rhs && !shape.same_dimensions(rhs.shape))
-			throw std::invalid_argument(" -= : incompatible dimensions.");
-
-		for (size_t i = 0; i < size; i++)
-			data[i + off] -= rhs.data[i + rhs.off];
-
-		return *this;
-
+		return binary_compound(rhs, "-=",
+			[](F& left, const F& right) { left -= right; });
 	}
 
 	// Multiplies this tensor by an equally shaped tensor in place.
 	Tensor<F>& operator*=(const Tensor<F>& rhs) {
-		if (this != &rhs && !shape.same_dimensions(rhs.shape))
-			throw std::invalid_argument(" *= : incompatible dimensions.");
+		return binary_compound(rhs, "*=",
+			[](F& left, const F& right) { left *= right; });
+	}
 
-		for (size_t i = 0; i < size; i++)
-			data[i + off] *= rhs.data[i + rhs.off];
-
-		return *this;
+	// Divides this tensor by an equally shaped tensor in place.
+	Tensor<F>& operator/=(const Tensor<F>& rhs) {
+		return binary_compound(rhs, "/=",
+			[](F& left, const F& right) { left /= right; });
 	}
 
 	// Returns a tensor with every element multiplied by a scalar.
 	Tensor<F> operator*(F rhs) const {
-		Tensor<F> out(shape, UninitializedTag{});
-		for (size_t i = 0; i < size; i++)
-			out.data[i] = data[i + off] * rhs;
-		return out;
+		return scalar_transform(rhs,
+			[](const F& left, const F& right) { return left * right; });
 	}
 
 	// Returns a tensor with a scalar added to every element.
 	Tensor<F> operator+(F rhs) const {
-		Tensor<F> out(shape, UninitializedTag{});
-		for (size_t i = 0; i < size; i++)
-			out.data[i] = data[i + off] + rhs;
-		return out;
+		return scalar_transform(rhs,
+			[](const F& left, const F& right) { return left + right; });
 	}
 
 	// Returns a tensor with every element divided by a scalar.
 	Tensor<F> operator/(F rhs) const {
-		Tensor<F> out(shape, UninitializedTag{});
-		for (size_t i = 0; i < size; i++)
-			out.data[i] = data[i + off] / rhs;
-		return out;
+		return scalar_transform(rhs,
+			[](const F& left, const F& right) { return left / right; });
 	}
 
 	// Returns a tensor with a scalar subtracted from every element.
 	Tensor<F> operator-(F rhs) const {
-		Tensor<F> out(shape, UninitializedTag{});
-		for (size_t i = 0; i < size; i++)
-			out.data[i] = data[i + off] - rhs;
-		return out;
+		return scalar_transform(rhs,
+			[](const F& left, const F& right) { return left - right; });
 	}
 
 	// Multiplies every element by a scalar in place.
 	Tensor<F>& operator*=(F value) {
-		for (size_t i = 0; i < size; i++)
-			data[i + off] *= value;
-
-		return *this;
+		return scalar_compound(value,
+			[](F& left, const F& right) { left *= right; });
 	}
 
 	// Adds a scalar to every element in place.
 	Tensor<F>& operator+=(F value) {
-		for (size_t i = 0; i < size; i++)
-			data[i + off] += value;
-
-		return *this;
+		return scalar_compound(value,
+			[](F& left, const F& right) { left += right; });
 	}
 
 	// Divides every element by a scalar in place.
 	Tensor<F>& operator/=(F value) {
-		for (size_t i = 0; i < size; i++)
-			data[i + off] /= value;
-
-		return *this;
+		return scalar_compound(value,
+			[](F& left, const F& right) { left /= right; });
 	}
 
 	// Subtracts a scalar from every element in place.
 	Tensor<F>& operator-=(F value) {
-		for (size_t i = 0; i < size; i++)
-			data[i + off] -= value;
-
-		return *this;
+		return scalar_compound(value,
+			[](F& left, const F& right) { left -= right; });
 	}
 
 	// Assigns one scalar value to every tensor element.
 	Tensor<F>& operator=(F value) {
-		for (size_t i = 0; i < size; i++)
-			data[i + off] = value;
-
-		return *this;
+		return scalar_compound(value,
+			[](F& left, const F& right) { left = right; });
 	}
 
 
@@ -847,7 +975,7 @@ public:
 		if (!shape.same_dimensions(rhs.shape))
 			throw std::invalid_argument("is_close_to : incompatible dimensions.");
 		for (size_t i = 0; i < size; i++) {
-			F dif = data[i + off] - rhs.data[i + rhs.off];
+			F dif = data[i] - rhs.data[i];
 			if (std::abs(dif) > std::abs(eps))
 				return false;
 		}
@@ -883,7 +1011,7 @@ public:
 				}
 				out += std::to_string(index[rank - 2]) + ":\t";
 			}
-			out += to_str(data[i + off]) + " ";
+			out += to_str(data[i]) + " ";
 			i++;
 		} while (i < size && inc_index(index.data()));
 		out += "\n";
@@ -900,9 +1028,16 @@ public:
 		return size;
 	}
 
-	// Copies the tensor dimensions into a caller-provided array.
-	void get_dim(size_t cap[]) const {
-		shape.copy_dimensions(cap);
+	// Returns all tensor dimensions in a capacity-safe container.
+	std::vector<size_t> dimensions() const {
+		return shape.dimensions();
+	}
+
+	// Returns one checked tensor dimension.
+	size_t dimension(unsigned i) const {
+		if (i >= rank)
+			throw std::out_of_range("tensor dimension is out of bounds.");
+		return shape.dimension(i);
 	}
 
 	// Returns a shared mutable reference to the underlying payload.
@@ -912,77 +1047,63 @@ public:
 
 	// Returns an immutable pointer to the first visible element.
 	const F* get_data() const {
-		return data.get_arr() ? data.get_arr() + off : nullptr;
+		return data.get_arr();
 	}
 
-	// Applies a unary function to every tensor element in place.
-	Tensor<F>& apply(F(*func)(F)) {
+	// Applies any compatible callable to every tensor element in place.
+	template<typename Function,
+		typename std::enable_if<std::is_invocable_r<F, Function&, F>::value, int>::type = 0>
+	Tensor<F>& apply(Function&& function) {
+		F* values = data.get_arr();
 		for (size_t i = 0; i < size; i++)
-			data[i + off] = func(data[i + off]);
+			values[i] = std::invoke(function, values[i]);
 		return *this;
 	}
 
-	// Returns a shared view selected by the first-axis index.
-	Tensor<F> operator[](size_t i) {
+	// Returns a mutable view selected by the first-axis index.
+	View operator[](size_t i) {
 		if (!rank || i >= shape.dimension(0))
-			return Tensor<F>();
+			return View();
 		if (rank == 1)
-			return Tensor<F>(*this, shape.scalar_shape(), 1, off + i);
-		return Tensor<F>(*this, shape.slice(1), size / shape.dimension(0),
-			off + i * shape.stride(0));
+			return View(data, shape.scalar_shape(), 1, i);
+		return View(data, shape.slice(1), size / shape.dimension(0),
+			i * shape.stride(0));
 	}
 
 	// Returns a read-only shared view selected from a const tensor.
 	ConstView operator[](size_t i) const {
-		return ConstView(data, shape, size, off)[i];
+		return ConstView(data, shape, size, 0)[i];
 	}
 
-	// Returns a shared view selected by a leading index list.
-	Tensor<F> operator[](const std::initializer_list<size_t>& index) {
+	// Returns a mutable view selected by a leading index list.
+	View operator[](const std::initializer_list<size_t>& index) {
 		if (rank < index.size() || !rank)
-			return Tensor<F>();
+			return View();
 		for (unsigned r = 0; r < index.size(); r++)
 			if (index.begin()[r] >= shape.dimension(r))
-				return Tensor<F>();
+				return View();
 
 		if (rank == index.size()) {
-			size_t pos = off;
+			size_t pos = 0;
 			for (unsigned i = 0; i < rank; i++)
 				pos += index.begin()[i] * shape.stride(i);
-			return Tensor<F>(*this, shape.scalar_shape(), 1, pos);
+			return View(data, shape.scalar_shape(), 1, pos);
 		}
-		size_t out_off = off;
+		size_t out_off = 0;
 		size_t out_size = size;
 		for (unsigned i = 0; i < index.size(); i++) {
 			out_off += index.begin()[i] * shape.stride(i);
 			out_size /= shape.dimension(i);
 		}
-		return Tensor<F>(*this, shape.slice(index.size()), out_size, out_off);
+		return View(data, shape.slice(index.size()), out_size, out_off);
 	}
 
 	// Returns a read-only shared view selected from a const tensor.
 	ConstView operator[](const std::initializer_list<size_t>& index) const {
-		return ConstView(data, shape, size, off)[index];
+		return ConstView(data, shape, size, 0)[index];
 	}
 
 private:
-
-	// Rejects direct element lookup because it is not implemented.
-	inline F& elm(size_t) {
-		throw std::logic_error("elm : not implemented.");
-	}
-
-	// Reports whether every coordinate lies within the tensor shape.
-	inline bool check_index(size_t index[]) {
-		if (!rank)
-			return false;
-		for (unsigned r = 0; r < rank; r++)
-			if (index[r] >= shape.dimension(r)) {
-				//throw std::invalid_argument("index: " + std::to_string(r) + " is out of the bound.");
-				return false;
-			}
-		return true;
-	}
 
 	// Advances a multidimensional index in row-major order.
 	inline bool inc_index(size_t index[]) const {
@@ -997,42 +1118,24 @@ private:
 		return true;
 	}
 
-	// Converts a multidimensional index to its payload position.
-	inline size_t index_to_pos(size_t index[]) const {
-		size_t pos = off;
-		for (unsigned r = 0; r < rank; r++) {
-			pos += index[r] * shape.stride(r);
-		}
-		return pos;
-	}
-
-	// Converts a payload position to a multidimensional index.
-	inline void pos_to_index(size_t pos, size_t index[]) const {
-		//if (i >= size)
-		//	throw std::invalid_argument("Out of bound index.");
-
-		size_t m, rm = (pos - off);
-		for (unsigned r = 0; r < rank; r++) {
-			m = rm / shape.stride(r);
-			rm = rm % shape.stride(r);
-			index[r] = m;
-		}
-	}
-
-public:
-	// Contracts one axis from each tensor through packed matrix multiplication.
-	static Tensor<F> cnt(const Tensor<F>& lt, const Tensor<F>& rt, unsigned li, unsigned ri) {
-		std::string out_meta = "cnt(" + lt.get_meta() + ":" + rt.get_meta() + ");";
-		if (lt.rank == 0 || rt.rank == 0)
+	// Contracts tensor-like operands through a shared packed-matrix implementation.
+	template<typename LeftTensor, typename RightTensor>
+	static Tensor<F> contract(const LeftTensor& lt, const RightTensor& rt,
+		unsigned li, unsigned ri, const std::string& out_meta) {
+		unsigned left_rank = lt.get_rank();
+		unsigned right_rank = rt.get_rank();
+		if (left_rank == 0 || right_rank == 0)
 			return Tensor<F>(out_meta);
-		if (li >= lt.rank || ri >= rt.rank
-			|| lt.shape.dimension(li) != rt.shape.dimension(ri))
+		if (li >= left_rank || ri >= right_rank
+			|| lt.dimension(li) != rt.dimension(ri))
 			throw std::invalid_argument("cnt : out of rank index or mismatch dimension.");
-		unsigned out_rank = lt.rank + rt.rank - 2;
+		unsigned out_rank = left_rank + right_rank - 2;
+		const F* left_data = lt.get_data();
+		const F* right_data = rt.get_data();
 		if (out_rank == 0) {
 			F val{};
-			for (size_t k = 0; k < lt.shape.dimension(0); k++)
-				val += lt.data[k + lt.off] * rt.data[k + rt.off];
+			for (size_t k = 0; k < lt.dimension(0); k++)
+				val += left_data[k] * right_data[k];
 			Tensor<F> out({ 1 }, val);
 			out.set_meta(out_meta);
 			return out;
@@ -1040,43 +1143,49 @@ public:
 
 		std::vector<size_t> out_dim;
 		out_dim.reserve(out_rank);
-		for (unsigned i = 0; i < lt.rank; i++)
+		for (unsigned i = 0; i < left_rank; i++)
 			if (i != li)
-				out_dim.push_back(lt.shape.dimension(i));
-		for (unsigned i = 0; i < rt.rank; i++)
+				out_dim.push_back(lt.dimension(i));
+		for (unsigned i = 0; i < right_rank; i++)
 			if (i != ri)
-				out_dim.push_back(rt.shape.dimension(i));
+				out_dim.push_back(rt.dimension(i));
 		Tensor<F> out(TensorShape(out_dim.data(), out_rank), UninitializedTag{});
 		out.set_meta(out_meta);
 
-		size_t k_size = lt.shape.dimension(li);
-		size_t m_size = lt.size / k_size;
-		size_t n_size = rt.size / k_size;
+		size_t k_size = lt.dimension(li);
+		size_t m_size = lt.get_size() / k_size;
+		size_t n_size = rt.get_size() / k_size;
 
 		Payload<F> l_matrix;
-		const F* l_arr = lt.data.get_arr() + lt.off;
-		if (li != lt.rank - 1) {
-			// Move the contracted left index to the last matrix index.
-			l_matrix = Payload<F>(lt.size);
-			size_t suffix_size = lt.shape.stride(li);
-			for (size_t pos = 0; pos < lt.size; pos++) {
+		const F* l_arr = left_data;
+		if (li != left_rank - 1) {
+			l_matrix = Payload<F>(lt.get_size());
+			F* packed_left = l_matrix.get_arr();
+			size_t suffix_size = 1;
+			for (unsigned i = li + 1; i < left_rank; i++)
+				suffix_size *= lt.dimension(i);
+			for (size_t pos = 0; pos < lt.get_size(); pos++) {
 				size_t k = (pos / suffix_size) % k_size;
-				size_t row = (pos / (k_size * suffix_size)) * suffix_size + pos % suffix_size;
-				l_matrix[row * k_size + k] = lt.data[pos + lt.off];
+				size_t row = (pos / (k_size * suffix_size)) * suffix_size
+					+ pos % suffix_size;
+				packed_left[row * k_size + k] = left_data[pos];
 			}
 			l_arr = l_matrix.get_arr();
 		}
 
 		Payload<F> r_matrix;
-		const F* r_arr = rt.data.get_arr() + rt.off;
+		const F* r_arr = right_data;
 		if (ri != 0) {
-			// Move the contracted right index to the first matrix index.
-			r_matrix = Payload<F>(rt.size);
-			size_t suffix_size = rt.shape.stride(ri);
-			for (size_t pos = 0; pos < rt.size; pos++) {
+			r_matrix = Payload<F>(rt.get_size());
+			F* packed_right = r_matrix.get_arr();
+			size_t suffix_size = 1;
+			for (unsigned i = ri + 1; i < right_rank; i++)
+				suffix_size *= rt.dimension(i);
+			for (size_t pos = 0; pos < rt.get_size(); pos++) {
 				size_t k = (pos / suffix_size) % k_size;
-				size_t col = (pos / (k_size * suffix_size)) * suffix_size + pos % suffix_size;
-				r_matrix[k * n_size + col] = rt.data[pos + rt.off];
+				size_t col = (pos / (k_size * suffix_size)) * suffix_size
+					+ pos % suffix_size;
+				packed_right[k * n_size + col] = right_data[pos];
 			}
 			r_arr = r_matrix.get_arr();
 		}
@@ -1095,6 +1204,19 @@ public:
 		return out;
 	}
 
+public:
+	// Contracts one axis from each owned tensor through packed matrix multiplication.
+	static Tensor<F> cnt(const Tensor<F>& lt, const Tensor<F>& rt, unsigned li, unsigned ri) {
+		return contract(lt, rt, li, ri,
+			"cnt(" + lt.get_meta() + ":" + rt.get_meta() + ");");
+	}
+
+	// Contracts tensor owners or views without materializing view payloads.
+	template<typename LeftTensor, typename RightTensor>
+	static Tensor<F> cnt(const LeftTensor& lt, const RightTensor& rt, unsigned li, unsigned ri) {
+		return contract(lt, rt, li, ri, "cnt(view);");
+	}
+
 	// Contracts this tensor's last axis with another tensor's first axis.
 	Tensor<F> operator%(const Tensor<F>& rhs) const {
 		return cnt(*this, rhs, rank - 1, 0);
@@ -1102,8 +1224,7 @@ public:
 
 	// Replaces tensor metadata from a C string.
 	void set_meta(const char* meta_str) {
-		strncpy(meta, meta_str, 63);
-		meta[63] = 0;
+		meta = meta_str ? meta_str : "";
 	}
 
 	// Replaces tensor metadata from a string.
@@ -1111,14 +1232,14 @@ public:
 		set_meta(meta_str.c_str());
 	}
 
-	// Returns the tensor metadata text.
-	std::string get_meta(void) const {
-		return std::string(meta);
+	// Returns the tensor metadata text without copying it.
+	const std::string& get_meta(void) const {
+		return meta;
 	}
 
 	// Appends text to the tensor metadata.
 	void append_meta(const std::string& mt_str) {
-		set_meta(get_meta() + mt_str);
+		meta += mt_str;
 	}
 
 
@@ -1134,8 +1255,9 @@ public:
 		size_t size = static_cast<size_t>(count);
 		Tensor<F> out(size);
 		out.set_meta("0;");
+		F* values = out.data.get_arr();
 		for (size_t i = 0; i < out.size; i++)
-			out.data[i] = start + i * jump;
+			values[i] = start + i * jump;
 		return out;
 	}
 

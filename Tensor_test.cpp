@@ -1,163 +1,201 @@
-#include <iostream>
-#include <random>
-#include <functional>
 #include <complex>
-#include <cstdlib>
+#include <iostream>
+#include <stdexcept>
+#include <string>
+#include <type_traits>
+#include <vector>
 
 #include "Tensor.hpp"
 
+size_t passed_tensor_tests = 0;
 
-std::default_random_engine rnd_gen;
-std::uniform_real_distribution<float> flt_dist(-1.0f, 1.0f);
-
-// Returns a random float in the configured distribution range.
-float rnd(void) {
-	return flt_dist(rnd_gen);
+// Throws with a diagnostic message when a tensor test fails.
+void require_tensor(bool condition, const std::string& message) {
+	if (!condition)
+		throw std::runtime_error(message);
 }
 
-// Prints every element in an array on one line.
-template<typename T>
-void print_arr(T arr[], size_t size) {
-	for (size_t i = 0; i < size; i++)
-		std::cout << arr[i] << " ";
-	std::cout << std::endl;
+// Verifies that a tensor contains the expected contiguous values.
+template<typename F>
+void require_values(const Tensor<F>& tensor, const std::vector<F>& expected,
+	const std::string& message) {
+	require_tensor(tensor.get_size() == expected.size(), message + ": size mismatch");
+	const F* values = tensor.get_data();
+	for (size_t i = 0; i < expected.size(); i++)
+		require_tensor(values[i] == expected[i], message + ": value mismatch");
 }
 
-// Returns the square of a float.
-float sqr(float f) {
-	return f * f;
+// Creates a mutable view whose original tensor has already been destroyed.
+Tensor<int>::View make_persistent_view() {
+	Tensor<int> source = Tensor<int>::range(1, 7).reshape({ 2, 3 });
+	return source[1];
 }
 
-// Exercises construction, arithmetic, reshaping, and complex values.
-void test_basics() {
-	size_t dim[] = { 2, 3 };
-	unsigned rank = 2;
-	Tensor<float> tn{ dim, rank, 1.11111f };
-	tn *= 3.24f;
-	Tensor<> r_tn(dim, rank, rnd);
-	std::cout << tn.to_string() << std::endl;
-	std::cout << r_tn.to_string() << std::endl;
-	Tensor<> res{ {2,3} };
-	res = tn + r_tn;
-	res.reshape({ 3, 2 }).apply(sqr);
-	std::cout << res.to_string() << std::endl;
-	Tensor<std::complex<float>> ct(3);
-	ct[1] = std::complex<float>{-1, 1};
-	std::cout << ct.to_string() << std::endl;
-	ct += std::complex<float>{0,3};
-	std::cout << ct.to_string() << std::endl;
-	ct /= std::complex<float>{1,1};
-	std::cout << ct.to_string() << std::endl;
+// Verifies constructors, generated values, ranges, and reshaping.
+void test_construction() {
+	Tensor<double> filled({ 2, 3, 4 }, 1.0);
+	require_tensor(filled.dimensions() == std::vector<size_t>({ 2, 3, 4 }),
+		"constant tensor dimensions mismatch");
+	require_tensor(filled.get_size() == 24, "constant tensor size mismatch");
+	for (size_t i = 0; i < filled.get_size(); i++)
+		require_tensor(filled.get_data()[i] == 1.0, "constant tensor value mismatch");
 
+	int next = 0;
+	Tensor<int> generated({ 2, 3 }, [&next]() { return ++next; });
+	require_values(generated, { 1, 2, 3, 4, 5, 6 }, "capturing generator");
+
+	Tensor<int> range = Tensor<int>::range(-2, 7, 2);
+	require_values(range, { -2, 0, 2, 4, 6 }, "range");
+	range.reshape({ 5, 1 });
+	require_tensor(range.dimensions() == std::vector<size_t>({ 5, 1 }),
+		"reshape dimensions mismatch");
+
+	Tensor<double> line = Tensor<double>::linspace(1.0, 2.0, 3);
+	require_values(line, { 1.0, 1.5, 2.0 }, "linspace");
+	passed_tensor_tests += 7;
 }
 
-// Exercises tensor contraction and its shorthand operator.
-void test_cnt() {
+// Verifies binary, scalar, compound, and callable arithmetic operations.
+void test_arithmetic() {
+	Tensor<int> left = Tensor<int>::range(1, 5).reshape({ 2, 2 });
+	Tensor<int> right({ 2, 2 }, 2);
+	require_values(left + right, { 3, 4, 5, 6 }, "tensor addition");
+	require_values(left - right, { -1, 0, 1, 2 }, "tensor subtraction");
+	require_values(left * right, { 2, 4, 6, 8 }, "tensor multiplication");
+	require_values((left * right) / right, { 1, 2, 3, 4 }, "tensor division");
+	require_values(left + 3, { 4, 5, 6, 7 }, "scalar addition");
+	require_values(left - 1, { 0, 1, 2, 3 }, "scalar subtraction");
+	require_values(left * 3, { 3, 6, 9, 12 }, "scalar multiplication");
+	require_values((left * 4) / 2, { 2, 4, 6, 8 }, "scalar division");
 
-	Tensor<int> t1("t1");
-	t1 = Tensor<int>::range(1, 25).reshape({ 2,2,3,2 });
-	std::cout << "t1:\n" << t1.to_string() << std::endl;
-	int v[] = { 11,12,21,22 };
-	Tensor<int> t2({ 2, 2 }, v); t2.set_meta("t2");
-	std::cout << "t2:\n" << t2.to_string() << std::endl;
-	std::cout << "cnt t1,t2:\n";
-	Tensor<int> t = Tensor<int>::cnt(t1, t2, 1, 1);
-	std::cout << t.to_string() << '\n' << std::endl;
+	const Tensor<int> constant({ 2, 2 }, 1);
+	Tensor<int> compound({ 2, 2 }, 2);
+	compound += constant;
+	compound -= Tensor<int>({ 2, 2 }, 1);
+	compound *= constant + 1;
+	compound /= constant + 1;
+	require_values(compound, { 2, 2, 2, 2 }, "compound tensor operands");
+	compound += 2;
+	compound -= 1;
+	compound *= 3;
+	compound /= 3;
+	require_values(compound, { 3, 3, 3, 3 }, "compound scalar operands");
 
-	Tensor<float> l_tf({ 2, 2 }, 1.0f, 4.0f); 
-	std::cout << "l_tf:\n" << l_tf.to_string() << std::endl;
-	Tensor<float> r_tf = Tensor<float>::range(0.0f, 4.0f).reshape({ 2, 2 });
-	std::cout << "r_tf:\n" << r_tf.to_string() << std::endl;
-	std::cout << "cnt l,r:\n" << Tensor<float>::cnt(l_tf, r_tf, 1, 0).to_string() << '\n' << std::endl;
-
-	Tensor<float> l_v({ 3 }, 1.0f, 3.0f);
-	std::cout << l_v.to_string() << std::endl;
-	Tensor<float> r_v = Tensor<float>::range(-2, 1).reshape({ 3 });
-	std::cout << "r_v is close to l_v? " << r_v.is_close_to(l_v, 1e-7) << std::endl;
-	std::cout << r_v.to_string() << std::endl;
-	std::cout << Tensor<float>::cnt(l_v, r_v, 0, 0).to_string() << std::endl;
-	std::cout << (l_v % r_v).to_string() << (r_v % l_v).to_string() << std::endl;
-
-	std::cout << "--End cnt--" << std::endl;
+	int captured = 4;
+	compound.apply([captured](int value) { return value + captured; });
+	require_values(compound, { 7, 7, 7, 7 }, "capturing apply callable");
+	passed_tensor_tests += 11;
 }
 
-// Exercises composition and decomposition of contraction indices.
-void test_index() {
-	size_t i1[]{ 1,2,3,4 }; print_arr<size_t>(i1, 4);
-	size_t i2[]{ 5,6,7 };   print_arr<size_t>(i2, 3);
-	size_t i[5]{ 0 };
-	unsigned li = 1;
-	unsigned ri = 2;
-	std::cout << li << ", " << ri << std::endl;
-	comp_index(i1, i2, i, 4, 3, li, ri);
-	print_arr<size_t>(i, 5);
-	decomp_index(i, i1, i2, 4, 3, 0, 1);
-	i1[0] = 22;
-	i2[1] = 22;
-	print_arr<size_t>(i1, 4);
-	print_arr<size_t>(i2, 3);
-	print_arr<size_t>(i, 5);
-}
-
-// Demonstrates shape and stride calculation from a dimension list.
-void test_initlist(const std::initializer_list<size_t>& dim_l) {
-	unsigned rank = dim_l.size();
-	std::cout << "rank: " << rank << std::endl;
-	size_t* jump = new size_t[rank];
-	size_t* dim = new size_t[rank];
-	size_t size = (bool)rank;
-	unsigned i = 0;
-	for (size_t d : dim_l) {
-		dim[i] = d;
-		size *= d;
-		i++;
-	}
-	std::cout << "size: " << size << std::endl;
-	jump[rank - 1] = 1;
-	for (unsigned i = 1; i < rank; i++) {
-		jump[rank - i - 1] = dim[rank - i] * jump[rank - i];
-	}
-	print_arr<size_t>(dim, rank);
-	print_arr<size_t>(jump, rank);
-	delete[] jump;
-	delete[] dim;
-}
-
-// Exercises element-wise addition of generated tensors.
-void test_opt() {
-	Tensor<> a({ 3, 4 }, rnd); // Tensor<>::linspace(1, 5, 12).reshape({ 3,4 });
-	Tensor<> b({ 3, 4 }, rnd);
-	std::cout << a.to_string() << b.to_string() << std::endl;
-
-	Tensor<> c = a + b ;
-	std::cout << c.to_string() << std::endl;
-
-}
-
-// Exercises scalar and sliced views into shared tensor storage.
+// Verifies explicit mutable and immutable tensor-view behavior.
 void test_views() {
-	Tensor<int> t({ 3, 3, 3 }, 1, 27);
-	std::cout << "t: " << t.to_string() << '\n';
-	Tensor<int> tt = t[1] = 33;
-	std::cout << "t: " << t.to_string() << '\n';
-	t[{0, 2}] = Tensor<int>::linspace(66,68,3);
-	std::cout << "t: " << t.to_string() << '\n';
-	t[{1, 1, 0}] = 99;
-	std::cout << "t: " << t.to_string() << std::endl;
-	std::cout << "tt: " << tt.to_string() << std::endl;
+	Tensor<int> tensor = Tensor<int>::range(1, 13).reshape({ 2, 2, 3 });
+	auto plane = tensor[1];
+	static_assert(std::is_same<decltype(plane), Tensor<int>::View>::value,
+		"mutable slicing must return Tensor::View");
+	require_tensor(plane.dimensions() == std::vector<size_t>({ 2, 3 }),
+		"mutable view dimensions mismatch");
+
+	auto row = tensor[{ 1, 0 }];
+	row = Tensor<int>::range(20, 23);
+	require_tensor(tensor.get_data()[6] == 20 && tensor.get_data()[8] == 22,
+		"view assignment did not update owner");
+	auto destination = tensor[{ 0, 1 }];
+	destination = row;
+	require_tensor(tensor.get_data()[3] == 20 && tensor.get_data()[5] == 22,
+		"view-to-view assignment failed");
+
+	Tensor<int> owned_copy = row;
+	row = 9;
+	require_values(owned_copy, { 20, 21, 22 }, "owned copy from view");
+	require_tensor(tensor.get_data()[6] == 9 && tensor.get_data()[8] == 9,
+		"scalar view assignment failed");
+
+	const Tensor<int>& const_tensor = tensor;
+	auto const_view = const_tensor[0];
+	static_assert(std::is_same<decltype(const_view), Tensor<int>::ConstView>::value,
+		"const slicing must return Tensor::ConstView");
+	static_assert(std::is_same<decltype(const_view.get_data()), const int*>::value,
+		"const view data must be immutable");
+	require_tensor(const_view.at({ 1, 2 }) == 22, "const view lookup failed");
+
+	auto persistent = make_persistent_view();
+	require_tensor(persistent.at({ 0 }) == 4 && persistent.at({ 2 }) == 6,
+		"mutable view did not retain storage lifetime");
+	persistent.apply([](int value) { return value * 2; });
+	require_tensor(persistent.at({ 0 }) == 8 && persistent.at({ 2 }) == 12,
+		"callable application to view failed");
+	passed_tensor_tests += 9;
 }
 
-// Runs the interactive tensor demonstration suite.
+// Verifies checked dimensions, full metadata, copies, and exception paths.
+void test_api_and_errors() {
+	Tensor<int> tensor = Tensor<int>::range(1, 7).reshape({ 2, 3 });
+	require_tensor(tensor.dimension(0) == 2 && tensor.dimension(1) == 3,
+		"checked dimension access failed");
+	bool threw = false;
+	try {
+		tensor.dimension(2);
+	}
+	catch (const std::out_of_range&) {
+		threw = true;
+	}
+	require_tensor(threw, "out-of-range dimension access did not throw");
+
+	std::string long_meta(160, 'm');
+	tensor.set_meta(long_meta);
+	tensor.append_meta("-tail");
+	require_tensor(tensor.get_meta() == long_meta + "-tail", "metadata was truncated");
+
+	Tensor<int> independent = tensor.copy();
+	tensor[0] = 0;
+	require_tensor(independent.get_data()[0] == 1,
+		"explicit tensor copy shared mutable storage");
+
+	threw = false;
+	try {
+		Tensor<int> mismatch({ 3, 2 }, 1);
+		static_cast<void>(tensor + mismatch);
+	}
+	catch (const std::invalid_argument&) {
+		threw = true;
+	}
+	require_tensor(threw, "mismatched arithmetic did not throw");
+
+	threw = false;
+	try {
+		tensor.reshape({ 7 });
+	}
+	catch (const std::invalid_argument&) {
+		threw = true;
+	}
+	require_tensor(threw, "mismatched reshape did not throw");
+	require_tensor(!Tensor<int>().to_string().empty(), "empty tensor formatting failed");
+
+	Payload<int> empty_payload;
+	threw = false;
+	try {
+		static_cast<void>(empty_payload[0]);
+	}
+	catch (const std::out_of_range&) {
+		threw = true;
+	}
+	require_tensor(threw, "empty payload access did not throw");
+	passed_tensor_tests += 8;
+}
+
+// Runs the automated general tensor test suite.
 int main() {
-
-	test_basics();
-	test_initlist({ 3,2,3,2 });
-	test_index();
-	test_cnt();
-	test_opt();
-	test_views();
-
-	std::cout << "Press Enter to end>";
-	std::cin.get();
+	try {
+		test_construction();
+		test_arithmetic();
+		test_views();
+		test_api_and_errors();
+		std::cout << "Tensor tests passed: " << passed_tensor_tests << std::endl;
+	}
+	catch (const std::exception& error) {
+		std::cerr << "Tensor test failed: " << error.what() << std::endl;
+		return 1;
+	}
 	return 0;
 }
