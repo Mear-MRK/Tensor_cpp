@@ -261,6 +261,11 @@ public:
 		return arr;
 	}
 
+	inline const F *get_arr() const
+	{
+		return arr;
+	}
+
 	inline size_t get_size() const
 	{
 		return size;

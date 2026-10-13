@@ -739,7 +739,7 @@ public:
 		}
 		if (li >= lt.rank || ri >= rt.rank || lt.dim[li] != rt.dim[ri])
 			throw std::invalid_argument("cnt : out of rank index or mismatch dimension.");
-		size_t out_rank = lt.rank + rt.rank - 2;
+		unsigned out_rank = lt.rank + rt.rank - 2;
 		if (out_rank == 0) {
 			F val = 0;
 			for (size_t k = 0; k < lt.dim[0]; k++)
@@ -755,23 +755,45 @@ public:
 		out.init(out_dim, out_rank);
 		delete[] out_dim;
 
-		out.data = Payload<F>(out.size);
+		size_t k_size = lt.dim[li];
+		size_t m_size = lt.size / k_size;
+		size_t n_size = rt.size / k_size;
 
-		size_t l_step = lt.jump[li];
-		size_t r_step = rt.jump[ri];
-		size_t l_jump = (li > 0) ? lt.jump[li - 1] : lt.size;
-		size_t r_jump = (ri > 0) ? rt.jump[ri - 1] : rt.size;
-		size_t pos = 0;
-		for (size_t l_i_off = lt.off; l_i_off < lt.size + lt.off; l_i_off += l_jump) {
-			for (size_t l_off = l_i_off; l_off < l_i_off + lt.jump[li]; l_off++) {
-				for (size_t r_i_off = rt.off; r_i_off < rt.size + rt.off; r_i_off += r_jump) {
-					for (size_t r_off = r_i_off; r_off < r_i_off + rt.jump[ri]; r_off++) {
-						out.data[pos] = 0;
-						for (size_t l_pos = l_off, r_pos = r_off; l_pos < l_off + l_jump; l_pos += l_step, r_pos += r_step)
-							out.data[pos] += lt.data[l_pos] * rt.data[r_pos];
-						pos++;
-					}
-				}
+		Payload<F> l_matrix;
+		const F* l_arr = lt.data.get_arr() + lt.off;
+		if (li != lt.rank - 1) {
+			// Move the contracted left index to the last matrix index.
+			l_matrix = Payload<F>(lt.size);
+			size_t suffix_size = lt.jump[li];
+			for (size_t pos = 0; pos < lt.size; pos++) {
+				size_t k = (pos / suffix_size) % k_size;
+				size_t row = (pos / (k_size * suffix_size)) * suffix_size + pos % suffix_size;
+				l_matrix[row * k_size + k] = lt.data[pos + lt.off];
+			}
+			l_arr = l_matrix.get_arr();
+		}
+
+		Payload<F> r_matrix;
+		const F* r_arr = rt.data.get_arr() + rt.off;
+		if (ri != 0) {
+			// Move the contracted right index to the first matrix index.
+			r_matrix = Payload<F>(rt.size);
+			size_t suffix_size = rt.jump[ri];
+			for (size_t pos = 0; pos < rt.size; pos++) {
+				size_t k = (pos / suffix_size) % k_size;
+				size_t col = (pos / (k_size * suffix_size)) * suffix_size + pos % suffix_size;
+				r_matrix[k * n_size + col] = rt.data[pos + rt.off];
+			}
+			r_arr = r_matrix.get_arr();
+		}
+
+		out.data = Payload<F>(out.size, F{});
+		F* out_arr = out.data.get_arr();
+		for (size_t m = 0; m < m_size; m++) {
+			for (size_t k = 0; k < k_size; k++) {
+				F l_value = l_arr[m * k_size + k];
+				for (size_t n = 0; n < n_size; n++)
+					out_arr[m * n_size + n] += l_value * r_arr[k * n_size + n];
 			}
 		}
 		return out;
