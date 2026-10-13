@@ -79,12 +79,14 @@ private:
 	size_t* dim = nullptr;
 	size_t* jump = nullptr;
 	Payload<F> data;
+	bool view = false;
 
 
 	inline void reset() {
 		rank = 0;
 		size = 0;
 		off = 0;
+		view = false;
 		delete[] dim;
 		dim = nullptr;
 		delete[] jump;
@@ -154,11 +156,17 @@ public:
 			rank = rhs.rank;
 			size = rhs.size;
 			off = rhs.off;
+			view = rhs.view;
 			dim = new size_t[rank];
 			memcpy(dim, rhs.dim, rank * sizeof(size_t));
 			jump = new size_t[rank];
 			memcpy(jump, rhs.jump, rank * sizeof(size_t));
-			data = rhs.data;
+			if (view)
+				data = rhs.data;
+			else {
+				off = 0;
+				data = rhs.data.copy(rhs.off, rhs.size);
+			}
 		}
 		set_meta(rhs.get_meta() + "Cc;");
 		LOG("tns cns, cop " << &rhs << " -> " << this << " : " << meta);
@@ -166,19 +174,30 @@ public:
 	
 	// copy assignment
 	Tensor<F>& operator=(const Tensor<F>& rhs) {
-		if (this == &rhs || !rhs.size)
+		if (this == &rhs)
 			return *this;
+		if (!rhs.size) {
+			if (!view)
+				reset();
+			return *this;
+		}
 		if (!size) {
 			rank = rhs.rank;
 			size = rhs.size;
 			off = rhs.off;
+			view = rhs.view;
 			dim = new size_t[rank];
 			memcpy(dim, rhs.dim, rank * sizeof(size_t));
 			jump = new size_t[rank];
 			memcpy(jump, rhs.jump, rank * sizeof(size_t));
-			data = rhs.data;
+			if (view)
+				data = rhs.data;
+			else {
+				off = 0;
+				data = rhs.data.copy(rhs.off, rhs.size);
+			}
 		}
-		if (size) {
+		else {
 			data.assign(rhs.data, rhs.off, size, off, rhs.size);
 		}
 
@@ -194,6 +213,7 @@ public:
 		rank = rhs.rank;
 		size = rhs.size;
 		off = rhs.off;
+		view = rhs.view;
 		dim = rhs.dim;
 		jump = rhs.jump;
 		data = std::move(rhs.data);
@@ -201,6 +221,7 @@ public:
 		rhs.rank = 0;
 		rhs.size = 0;
 		rhs.off = 0;
+		rhs.view = false;
 		rhs.dim = nullptr;
 		rhs.jump = nullptr;
 
@@ -211,27 +232,35 @@ public:
 	}
 	
 	// move assignement
-	Tensor<F>& operator=(Tensor<F>&& rhs) noexcept {
-		if (this == &rhs || !rhs.size)
+	Tensor<F>& operator=(Tensor<F>&& rhs) {
+		if (this == &rhs)
 			return *this;
+		if (!rhs.size) {
+			if (!view)
+				reset();
+			return *this;
+		}
 
 		if (!size) {
 			rank = rhs.rank;
 			size = rhs.size;
 			off = rhs.off;
+			view = rhs.view;
 			dim = rhs.dim;
 			jump = rhs.jump;
 			data = std::move(rhs.data);
+
+			rhs.rank = 0;
+			rhs.size = 0;
+			rhs.off = 0;
+			rhs.view = false;
+			rhs.dim = nullptr;
+			rhs.jump = nullptr;
 		}
-		if (size) {
+		else {
 			data.assign(rhs.data, rhs.off, size, off, rhs.size);
-			rhs.data.release();
+			rhs.reset();
 		}
-		rhs.rank = 0;
-		rhs.size = 0;
-		rhs.off = 0;
-		rhs.dim = nullptr;
-		rhs.jump = nullptr;
 
 		append_meta("]" + rhs.get_meta() + "M=,");
 
@@ -316,6 +345,9 @@ public:
 
 	Tensor(const std::initializer_list<size_t>& dim_l) : Tensor(dim_l.begin(), dim_l.size()) {}
 
+	Tensor(const std::initializer_list<size_t>& dim_l, F value) : Tensor(dim_l.begin(), dim_l.size(), value) {
+	}
+
 	Tensor(const std::initializer_list<size_t>& dim_l, const Payload<F>& data) : Tensor(dim_l.begin(), dim_l.size(), data) {
 	}
 
@@ -344,19 +376,22 @@ public:
 	}
 
 	Tensor<F>& reshape(const size_t new_dim[], unsigned new_rank) {
-		if (!new_rank)
+		if (!new_rank) {
 			if (!rank)
 				return *this;
 			else
 				throw std::invalid_argument("reshape : mismatch sizes.");
+		}
 		size_t* new_cum_dim = new size_t[new_rank];
 		new_cum_dim[new_rank - 1] = 1;
 		for (unsigned i = 1; i < new_rank; i++) {
 			new_cum_dim[new_rank - i - 1] = new_cum_dim[new_rank - i] * new_dim[new_rank - i];
 		}
 		size_t new_size = new_cum_dim[0] * new_dim[0];
-		if (new_size != size)
+		if (new_size != size) {
+			delete[] new_cum_dim;
 			throw std::invalid_argument("reshape : incompatible dimensions: mismatch size.");
+		}
 		if (!new_size) {
 			delete[] new_cum_dim;
 			return *this;
@@ -531,6 +566,8 @@ public:
 				out += std::to_string(dim[r]) + ((r != rank - 1) ? "," : "");
 		}
 		out += "\nmeta: " + std::string(meta) + "\n";
+		if (!size)
+			return out;
 
 		size_t* index = new size_t[rank]{ 0 };
 		size_t i = 0;
@@ -577,7 +614,7 @@ public:
 	}
 
 	Tensor<F> operator[](size_t i) const {
-		if (i >= size || !rank)
+		if (!rank || i >= dim[0])
 			return Tensor<F>();
 		if (rank == 1) {
 			Tensor<F> out;
@@ -586,6 +623,7 @@ public:
 			out.dim = new size_t{ 1 };
 			out.jump = new size_t{ 1 };
 			out.off = i + off;
+			out.view = true;
 			out.data = data;
 			return out;
 		}
@@ -598,6 +636,7 @@ public:
 		memcpy(out.jump, jump + 1, out.rank * sizeof(size_t));
 		out.size = size / dim[0];
 		out.off = off + i * jump[0];
+		out.view = true;
 		out.data = data;
 		return out;
 
@@ -620,6 +659,7 @@ public:
 			out.dim = new size_t{ 1 };
 			out.jump = new size_t{ 1 };
 			out.off = pos;
+			out.view = true;
 			out.data = data;
 			return out;
 		}
@@ -630,6 +670,7 @@ public:
 		out.jump = new size_t[out.rank];
 		memcpy(out.jump, jump + index.size(), out.rank * sizeof(size_t));
 		out.off = off;
+		out.view = true;
 		out.size = size;
 		for (unsigned i = 0; i < index.size(); i++) {
 			out.off += index.begin()[i] * jump[i];
@@ -641,7 +682,7 @@ public:
 
 private:
 
-	inline F& elm(size_t i) {
+	inline F& elm(size_t) {
 		throw std::logic_error("elm : not implemented.");
 	}
 
@@ -712,6 +753,7 @@ public:
 		out_dim = new size_t[out_rank];
 		comp_index(lt.dim, rt.dim, out_dim, lt.rank, rt.rank, li, ri);
 		out.init(out_dim, out_rank);
+		delete[] out_dim;
 
 		out.data = Payload<F>(out.size);
 

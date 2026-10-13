@@ -4,7 +4,7 @@
 #include <complex>
 #include <cstdlib>
 
-#include "tensor.hpp"
+#include "Tensor.hpp"
 
 
 std::default_random_engine rnd_gen;
@@ -105,6 +105,7 @@ void test_initlist(const std::initializer_list<size_t>& dim_l) {
 		size *= d;
 		i++;
 	}
+	std::cout << "size: " << size << std::endl;
 	jump[rank - 1] = 1;
 	for (unsigned i = 1; i < rank; i++) {
 		jump[rank - i - 1] = dim[rank - i] * jump[rank - i];

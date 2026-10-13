@@ -1,4 +1,8 @@
 #pragma once
+#include <algorithm>
+#include <cstddef>
+#include <cstring>
+#include <iostream>
 #include <stdexcept>
 
 #ifdef DEBUG
@@ -18,7 +22,7 @@ private:
 public:
 	Payload() : ref_count(nullptr), size(0), arr(nullptr) { LOG("pyl cns, dfl " << this); }
 
-	Payload(size_t size) : size(size)
+	explicit Payload(size_t size) : size(size)
 	{
 		if (size)
 		{
@@ -33,12 +37,13 @@ public:
 		LOG("pyl cns, siz " << this);
 	}
 
-	Payload(F array[], size_t size) : size(size)
+	Payload(const F array[], size_t size) : size(size)
 	{
 		if (size)
 		{
 			ref_count = new int(1);
-			arr = array;
+			arr = new F[size];
+			std::copy_n(array, size, arr);
 		}
 		else
 		{
@@ -202,7 +207,7 @@ public:
 		}
 	}
 
-	bool init(F array[], size_t size)
+	bool init(const F array[], size_t size)
 	{
 		if (ref_count)
 		{
@@ -213,7 +218,8 @@ public:
 		if (size)
 		{
 			ref_count = new int(1);
-			arr = array;
+			arr = new F[size];
+			std::copy_n(array, size, arr);
 			return true;
 		}
 		else

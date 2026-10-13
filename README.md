@@ -1,6 +1,6 @@
 # Tensor Library in C++
 
-This project provides an implementation of a Tensor library in C++. It includes handling of multi-dimensional arrays with support for various operations and memory management techniques. The library also includes reference counting for efficient memory use and copy-on-write semantics to optimize performance.
+This project provides an implementation of a Tensor library in C++. It includes handling of multi-dimensional arrays with support for various operations and memory management techniques. The library also includes reference counting for efficient tensor views while ordinary tensor copies remain independent.
 
 
 ## Features
