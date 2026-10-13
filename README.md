@@ -6,8 +6,9 @@ This project provides an implementation of a Tensor library in C++. It includes 
 ## Features
 
 - **Tensor Class**: Supports multi-dimensional arrays with various mathematical operations.
-- **Payload Class**: Manages the underlying data with reference counting and efficient memory operations.
-- **Memory Management**: Includes copy constructors, move constructors, and assignment operators for efficient memory handling.
+- **Payload Class**: Manages underlying data with manual atomic reference counting and type-safe memory operations.
+- **Memory Management**: Uses direct construction, movable ownership, and shared immutable shape metadata for allocation-free slicing.
+- **Const Views**: Slicing a const tensor returns a read-only shared view.
 - **Optimized Contraction**: Reorders contracted axes into matrices and uses matrix multiplication.
 - **Optional BLAS**: Uses a CBLAS-compatible library when enabled, with an automatic built-in fallback.
 - **Debugging**: Debugging support with logging enabled via the `DEBUG` preprocessor definition.
@@ -89,11 +90,20 @@ Other element types and matrix dimensions larger than the BLAS integer interface
 
 `Tensor_contraction_test.cpp` compares the matrix-product implementation with an independent generic contraction. It covers all contraction-axis combinations for rank-3 and rank-4 tensors, integer, floating-point and complex element types, tensor views with nonzero offsets, vector dot products, invalid dimensions, invalid axes, and empty inputs.
 
+`Tensor_refactor_test.cpp` covers owned and view assignment, overlapping copies, non-trivial payload types, const views, atomic reference counting, dimension overflow, reshape exception safety, and shared view-shape lifetime.
+
 Run the dependency-free tests:
 
 ```bash
 c++ -std=c++17 -Wall -Wextra -Wpedantic Tensor_contraction_test.cpp -o tensor_contraction_test
 ./tensor_contraction_test
+```
+
+Run the ownership and safety regression tests:
+
+```bash
+c++ -std=c++17 -Wall -Wextra -Wpedantic Tensor_refactor_test.cpp -pthread -o tensor_refactor_test
+./tensor_refactor_test
 ```
 
 Run the same tests with OpenBLAS:

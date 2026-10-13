@@ -66,7 +66,7 @@ void test_cnt() {
 
 	Tensor<float> l_tf({ 2, 2 }, 1.0f, 4.0f); 
 	std::cout << "l_tf:\n" << l_tf.to_string() << std::endl;
-	Tensor<float> r_tf = std::move(Tensor<float>::range(0.0f, 4.0f).reshape({ 2, 2 }));
+	Tensor<float> r_tf = Tensor<float>::range(0.0f, 4.0f).reshape({ 2, 2 });
 	std::cout << "r_tf:\n" << r_tf.to_string() << std::endl;
 	std::cout << "cnt l,r:\n" << Tensor<float>::cnt(l_tf, r_tf, 1, 0).to_string() << '\n' << std::endl;
 
