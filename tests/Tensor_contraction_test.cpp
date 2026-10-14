@@ -2,11 +2,12 @@
 #include <cmath>
 #include <complex>
 #include <iostream>
+#include <random>
 #include <stdexcept>
 #include <string>
 #include <vector>
 
-#include "Tensor.hpp"
+#include "../Tensor.hpp"
 
 size_t passed_tests = 0;
 
@@ -119,6 +120,28 @@ std::vector<F> make_values(size_t size, int seed) {
 	return values;
 }
 
+// Builds reproducible random scalar test data of the requested size.
+template<typename F>
+std::vector<F> make_random_values(size_t size, std::mt19937& generator) {
+	std::uniform_int_distribution<int> values(-8, 8);
+	std::vector<F> out(size);
+	for (size_t i = 0; i < size; i++)
+		out[i] = static_cast<F>(values(generator)) / static_cast<F>(4);
+	return out;
+}
+
+// Builds reproducible random complex test data of the requested size.
+template<>
+std::vector<std::complex<double>> make_random_values(size_t size,
+	std::mt19937& generator) {
+	std::uniform_int_distribution<int> values(-8, 8);
+	std::vector<std::complex<double>> out(size);
+	for (size_t i = 0; i < size; i++)
+		out[i] = { static_cast<double>(values(generator)) / 4.0,
+			static_cast<double>(values(generator)) / 4.0 };
+	return out;
+}
+
 // Compares optimized contraction output with a direct reference calculation.
 template<typename F, typename LeftTensor, typename RightTensor>
 void verify_contraction(const LeftTensor& left, const std::vector<size_t>& left_dims,
@@ -179,6 +202,39 @@ void test_axis_pairs(const std::vector<size_t>& left_dims,
 			verify_contraction(left, left_dims, left_values, li,
 				right, right_dims, right_values, ri, name);
 		}
+	}
+}
+
+// Compares random contractions with the independent generic calculation.
+template<typename F>
+void test_random_contractions(unsigned seed, unsigned trials,
+	const std::string& name) {
+	std::mt19937 generator(seed);
+	std::uniform_int_distribution<unsigned> ranks(1, 4);
+	std::uniform_int_distribution<size_t> dimensions(1, 4);
+	for (unsigned trial = 0; trial < trials; trial++) {
+		std::vector<size_t> left_dims(ranks(generator));
+		std::vector<size_t> right_dims(ranks(generator));
+		for (size_t& dimension : left_dims)
+			dimension = dimensions(generator);
+		for (size_t& dimension : right_dims)
+			dimension = dimensions(generator);
+
+		std::uniform_int_distribution<unsigned> left_axes(0,
+			static_cast<unsigned>(left_dims.size() - 1));
+		std::uniform_int_distribution<unsigned> right_axes(0,
+			static_cast<unsigned>(right_dims.size() - 1));
+		unsigned li = left_axes(generator);
+		unsigned ri = right_axes(generator);
+		right_dims[ri] = left_dims[li];
+
+		std::vector<F> left_values = make_random_values<F>(tensor_size(left_dims), generator);
+		std::vector<F> right_values = make_random_values<F>(tensor_size(right_dims), generator);
+		Tensor<F> left(left_dims.data(), static_cast<unsigned>(left_dims.size()), left_values.data());
+		Tensor<F> right(right_dims.data(), static_cast<unsigned>(right_dims.size()), right_values.data());
+		verify_contraction(left, left_dims, left_values, li,
+			right, right_dims, right_values, ri,
+			name + " trial " + std::to_string(trial));
 	}
 }
 
@@ -260,6 +316,11 @@ int main() {
 		test_dot_product<double>("double dot product");
 		test_dot_product<std::complex<float>>("complex float dot product");
 		test_dot_product<std::complex<double>>("complex double dot product");
+
+		test_random_contractions<int>(0x31a7u, 8, "random int");
+		test_random_contractions<double>(0x84c1u, 8, "random double");
+		test_random_contractions<std::complex<double>>(0xb529u, 8,
+			"random complex double");
 
 		test_invalid_inputs();
 

@@ -7,7 +7,7 @@
 #include <type_traits>
 #include <vector>
 
-#include "Tensor.hpp"
+#include "../Tensor.hpp"
 
 size_t passed_refactor_tests = 0;
 

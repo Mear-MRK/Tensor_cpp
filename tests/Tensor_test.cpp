@@ -5,7 +5,7 @@
 #include <type_traits>
 #include <vector>
 
-#include "Tensor.hpp"
+#include "../Tensor.hpp"
 
 size_t passed_tensor_tests = 0;
 

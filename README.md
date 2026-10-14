@@ -17,6 +17,16 @@ This project provides an implementation of a Tensor library in C++. It includes 
 
 The standard shared-pointer control blocks make ownership operations safe across threads. Concurrent writes to tensor elements still require synchronization by the caller.
 
+## Project Layout
+
+- `Tensor.hpp` provides the public tensor and view API.
+- `Payload.hpp` manages shared contiguous element storage.
+- `TensorShape.hpp` manages immutable dimensions and row-major strides.
+- `TensorBlas.hpp` provides optional BLAS matrix-product dispatch and the built-in fallback.
+- `TensorFormat.hpp` provides value formatting used by tensor string conversion.
+- `TensorDebug.hpp` provides opt-in debug logging.
+- `tests/` contains the automated test programs.
+
 ## Performance Note
 
 Tensor contraction moves the contracted left index to the last matrix index and the contracted right index to the first matrix index. It then performs an `M x K` by `K x N` matrix multiplication. Packing is skipped when an input is already in the required layout. The built-in matrix loop is dependency-free and single-threaded; a BLAS library can provide additional vectorization and parallelism.
@@ -104,39 +114,39 @@ Other element types and matrix dimensions larger than the BLAS integer interface
 
 ## Tests
 
-`Tensor_test.cpp` is a non-interactive assertion-based suite for construction, all arithmetic operators, const and temporary compound operands, capturing callables, mutable and const views, safe shape access, metadata, copies, and exception paths.
+`tests/Tensor_test.cpp` is a non-interactive assertion-based suite for construction, all arithmetic operators, const and temporary compound operands, capturing callables, mutable and const views, safe shape access, metadata, copies, and exception paths.
 
-`Tensor_contraction_test.cpp` compares the matrix-product implementation with an independent generic contraction. It covers all contraction-axis combinations for rank-3 and rank-4 tensors, integer, floating-point and complex element types, tensor views with nonzero offsets, vector dot products, invalid dimensions, invalid axes, and empty inputs.
+`tests/Tensor_contraction_test.cpp` compares the matrix-product implementation with an independent generic contraction. It covers all contraction-axis combinations for rank-3 and rank-4 tensors, reproducible randomized ranks, dimensions, axes and values, integer, floating-point and complex element types, tensor views with nonzero offsets, vector dot products, invalid dimensions, invalid axes, and empty inputs.
 
-`Tensor_refactor_test.cpp` covers owned and view assignment, overlapping copies, non-trivial payload types, const views, concurrent shared ownership, dimension overflow, reshape exception safety, and shared view-shape lifetime.
+`tests/Tensor_refactor_test.cpp` covers owned and view assignment, overlapping copies, non-trivial payload types, const views, concurrent shared ownership, dimension overflow, reshape exception safety, and shared view-shape lifetime.
 
 Run the dependency-free tests:
 
 ```bash
-c++ -std=c++17 -Wall -Wextra -Wpedantic Tensor_test.cpp -o tensor_test
+c++ -std=c++17 -Wall -Wextra -Wpedantic tests/Tensor_test.cpp -o tensor_test
 ./tensor_test
 
-c++ -std=c++17 -Wall -Wextra -Wpedantic Tensor_contraction_test.cpp -o tensor_contraction_test
+c++ -std=c++17 -Wall -Wextra -Wpedantic tests/Tensor_contraction_test.cpp -o tensor_contraction_test
 ./tensor_contraction_test
 ```
 
 Run the ownership and safety regression tests:
 
 ```bash
-c++ -std=c++17 -Wall -Wextra -Wpedantic Tensor_refactor_test.cpp -pthread -o tensor_refactor_test
+c++ -std=c++17 -Wall -Wextra -Wpedantic tests/Tensor_refactor_test.cpp -pthread -o tensor_refactor_test
 ./tensor_refactor_test
 ```
 
 Run the same tests with OpenBLAS:
 
 ```bash
-c++ -std=c++17 -DTENSOR_USE_BLAS -Wall -Wextra -Wpedantic Tensor_contraction_test.cpp -lopenblas -o tensor_contraction_test
+c++ -std=c++17 -DTENSOR_USE_BLAS -Wall -Wextra -Wpedantic tests/Tensor_contraction_test.cpp -lopenblas -o tensor_contraction_test
 ./tensor_contraction_test
 ```
 
 Run them with Apple Accelerate:
 
 ```bash
-c++ -std=c++17 -DTENSOR_USE_BLAS -DACCELERATE_NEW_LAPACK -Wall -Wextra -Wpedantic Tensor_contraction_test.cpp -framework Accelerate -o tensor_contraction_test
+c++ -std=c++17 -DTENSOR_USE_BLAS -DACCELERATE_NEW_LAPACK -Wall -Wextra -Wpedantic tests/Tensor_contraction_test.cpp -framework Accelerate -o tensor_contraction_test
 ./tensor_contraction_test
 ```
